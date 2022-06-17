@@ -1,0 +1,490 @@
+#sim.results=output from whole_network_function
+#formula= formula to simulate networks
+#ego.samp.size=if sample=T, how large should the sample be
+#sample=should the ego network disribution from the simulated networks be taken from a sample or a census?
+#numnets=number of networks desired to be in final list, which meet chi square criteria
+#interval=interval between where simulations are taken from the sampler
+#burnin=number of simulations taken before begin sampling
+#constraints=constraints to be passed to ERGM for simulations
+#chi.values=chi square value that is used as benchmark to determine which networks to keep (typically 
+#lowest chi square value found in previous analysis)
+#tableego=empirical ego network configuration distribution
+#max.alter=max number of alters the respondents were allowed to name-used  to calculate the ego network distribution 
+#bound=how much above min chi square (set in chi.values) is considered acceptable and network should still be kept
+#[i.e., if chi square from that network is within that range from min chi square, should keep it]
+#ns=number of networs to generate when simulating from each possible set of coefficients
+#alpha.fixed=is alpha set as fixed in the formula (can be set as NULL, then determined by formula)
+
+#update.homophily=T/F should updated homophily coefficients to check homophily right?
+#egonet.data=only neccessary if the homophily parameters are updated
+#
+#var.name.degree=only neccessary if the homophily parameters are updated
+#name of variable in egonet.data that has the degree of the respondents
+
+#var.name.characs=only neccessary if the homophily parameters are updated
+# a vector of variable names in egonet.data corresponding to the homophily characteristics
+#of the respondent
+
+#var.name.characs.alter=only neccessary if the homophily parameters are updated
+# a list, where each element is a vector of variable names egonet.data corresponding to the homophily characteristics
+#of the alters; in the same order as with the var.name.characs
+#constant.homophily.change=which coefficients are held constant as the algorithm searches for a better fit 
+#no.nodecov=only needed if the homophily paramaters are updated: T or F, T if the updating process for the homophily coefficients
+#max.iter=maximum time will run through all of coefficients looking for desired number of networks
+#that meet criteria; exits if reach max.iter and not found desired number of nets.
+
+run_netlist_function=function(sim.results,formula,
+ sample=T,ego.samp.size=1000,
+numnets=5,burnin,interval,constraints
+,chi.values,tableego,max.alter,bound=30,ns=10,alpha.fixed=NULL,
+update.homophily=F,egonet.data=NULL,var.name.degree=NULL,
+var.name.characs=NULL
+,constant.homophily.change=NULL
+,no.nodecov=T,resp.weights=NULL,old.weight.mix=NULL,max.thres=NULL, max.iter=5, initial.network=NULL
+,useparallel=F, num.cores=2){
+
+params=sim.results$best.params
+
+if (is.null(initial.network)==F){
+net=initial.network
+formula=as.formula(paste("net~",paste(formula)[[3]]))
+}
+
+if (is.null(initial.network)==T){
+net=sim.results$last.network
+formula=as.formula(paste("net~",paste(formula)[[3]]))
+}
+
+if (is.null(alpha.fixed)){
+alpha.fixed=T
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+if ( length(grep("gwesp",form.list[[i]]))>0){
+    alpha.fixed=as.character(form.list[[i]][3])%in%c("T","TRUE")
+    }
+  }
+} #null alpha.fixed
+
+
+
+if (alpha.fixed==F){
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+if ( length(grep("gwesp",form.list[[i]]))>0){
+#form.list[[i]][3]=T
+form.list[[i]]=paste(formula(~gwesp(alpha,fixed=T))[2])
+    }
+  }
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+} #alpha.fixed=F
+
+
+########
+if (update.homophily==T){
+sum.vars=summary(formula)
+name.vars=names(sum.vars) #getting name of variables in formula
+
+#bit of code to set up formula for case control logistic regression
+#putting in reference categories where appropriate
+
+temp.name.list=c()
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+
+mix=length(grep("mix",paste(form.list[[i]])))>0
+
+if (mix){
+
+temp.stats=sum.vars[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+temp.coefs=params[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+#only keep those within 1 value of max of temp.coefs or positive 
+temp.stats=temp.stats[ temp.coefs>(max(temp.coefs)-1)|temp.coefs>0 ]
+
+temp.name=names(which(temp.stats==max(temp.stats)))
+temp.name2=strsplit(temp.name,paste("mix.",paste(form.list[[i]][2]),".",sep=""))[[1]][2]
+
+form.list[[i]][3]=temp.name2 #using the largest set as reference group in case control logistic regression
+temp.name.list[i]=temp.name
+ }
+}
+
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula.case=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+
+#getting name of variables in formula for case control logistic regression 
+name.vars.case=name.vars[!name.vars%in% temp.name.list]
+
+########
+}
+
+netlist_inputs=collect_best_coefficients_outputnet(sim.results=sim.results, bound=bound,
+formula=formula,alpha.fixed=alpha.fixed)
+
+
+cutoff=min(chi.values)+bound
+
+
+#getting best nets that meet criteria
+
+n<-0
+
+if (sample==FALSE){
+ids<-c(1:as.numeric(net[[2]][1]))
+ego.samp.size=as.numeric(net[[2]][1])
+}
+
+if (sample==TRUE){
+
+ids<-sample(c(1:as.numeric(net[[2]][1])),ego.samp.size,replace=TRUE)
+}
+
+
+netlist<-list()
+
+flag=0
+
+while (n<numnets & flag<max.iter){
+
+if (useparallel==F) {
+
+chi.dist=list()
+paramatrix=netlist_inputs$paramatrix
+
+
+if (alpha.fixed==F){
+alphas.keep=netlist_inputs$alphas.keep
+}
+
+
+max_expected_edges=summary(net~edges)*10
+
+for (s in 1:nrow(paramatrix)){
+
+if (alpha.fixed==F){
+alpha=alphas.keep[s]
+}
+params=netlist_inputs$paramatrix[s,]
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+if (!update.homophily) {
+
+netchange<-simulate(formula, coef=c(params),
+nsim=ns, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+}
+
+if (update.homophily) {
+params.orig=params
+
+#max_expected_edges=summary(net~edges)*10
+
+netchange<-simulate(formula, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+}
+
+
+randegos<-list();
+if (ns==1){
+  randegos[[1]]= netchange
+}
+if (ns>1){
+#for (e in 1:ns){
+ 
+randegos<-netchange
+
+# }
+}
+
+
+#if (is.null(diff.tableego.vector)){
+randdist<-lapply(randegos,egodistfunc,ids=ids,max.alter=max.alter)
+randdist<-lapply(randdist,unlist)
+at<-lapply(randdist,randdistfunc,tableego=tableego)
+
+#}
+
+chi.dist[[s]]=list(at, netchange)
+
+ }#s
+} #not doing parallel procoessing
+
+
+if (useparallel==T) {
+paramatrix=netlist_inputs$paramatrix
+nets1=NULL
+
+if (alpha.fixed==F){
+alphas.keep=netlist_inputs$alphas.keep
+}
+
+max_expected_edges=summary(net~edges)*10
+
+cl <- makePSOCKcluster(num.cores)
+registerDoParallel(cl)
+vals.temp=1:nrow(paramatrix)
+
+chi.dist <- foreach(s = vals.temp, .export=c('egodistfunc', 'as.edgelist.func', 'randdistfunc',
+'adjusted.coefs.func', 'rearrange.func', 'delete.func', 'egofunc', 'slist',
+'case.control.data.function', 'diff.func','match.func','mix.func', 'which.func','order.func'), 
+.noexport=c('netlist', 'nets1')) %dopar% {
+
+library(ergm)
+library(biglm)
+
+#chi.dist=list()
+#for (s in 1:nrow(paramatrix)){
+
+if (alpha.fixed==F){
+alpha=alphas.keep[s]
+}
+params=netlist_inputs$paramatrix[s,]
+
+
+net.temp=net
+formula.temp=as.formula(paste("net.temp~",paste(formula)[[3]]))
+
+if (!update.homophily) {
+
+
+netchange<-simulate(formula.temp, coef=c(params),
+nsim=ns, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+}
+
+if (update.homophily) {
+params.orig=params
+
+#max_expected_edges=summary(net~edges)*10
+
+netchange<-simulate(formula.temp, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+
+
+}
+
+
+randegos<-list();
+if (ns==1){
+  randegos[[1]]= netchange
+}
+if (ns>1){
+#for (e in 1:ns){
+ 
+randegos<-netchange
+
+# }
+}
+
+
+#if (is.null(diff.tableego.vector)){
+randdist<-lapply(randegos,egodistfunc,ids=ids,max.alter=max.alter)
+randdist<-lapply(randdist,unlist)
+at<-lapply(randdist,randdistfunc,tableego=tableego)
+
+#}
+
+list(at, netchange)
+ }
+stopCluster(cl)
+
+} #will do parallel processin
+
+
+
+chisqlist<-list()
+for (x in 1:nrow(paramatrix)) {chisq<-0
+for (q in 1:ns) {chisq[q]<-unlist(chi.dist[[x]][[1]][[q]][1])
+}
+
+chisqlist[[x]]<-chisq
+
+}
+
+
+
+keepnets<-lapply(chisqlist,cutofffunction,cutoff=cutoff,ns=ns)
+nets<-list()
+
+
+for (i in 1:length(keepnets)) 
+
+{
+at<-as.numeric(lapply(keepnets,length))
+nets[[i]]<-rep(i,at[i])
+
+}
+
+
+if (sum(at)==0) {
+netlist<-netlist}
+
+if (sum(at)>0) {
+
+datakeepnets<- matrix(cbind(as.numeric(unlist(nets)),as.numeric(unlist(keepnets))),
+c(sum(as.numeric(lapply(keepnets,length))),2))
+
+
+if (alpha.fixed==T){
+nets1<-apply(datakeepnets,1,netsfunc,chi.dist=chi.dist,chisqlist=chisqlist,paramatrix=paramatrix,realdist=tableego)
+}
+
+
+if (alpha.fixed==F){
+paramatrix.temp=cbind(paramatrix,alpha=alphas.keep)
+nets1<-apply(datakeepnets,1,netsfunc,chi.dist=chi.dist,chisqlist=chisqlist,paramatrix=paramatrix.temp,realdist=tableego)
+}
+
+
+netlist[(n+1):(length(nets1)+n)]<-nets1
+
+}
+n<-length(netlist);print(n)
+flag=flag+1
+
+rm(chi.dist)
+}#while
+
+#}
+
+
+
+if (length(netlist)>0){
+chi<-NULL
+for (x in 1:length(netlist)) {
+chi[x]<-netlist[[x]][3]}
+chi<-unlist(chi)
+
+param.list=list()
+for (x in 1:length(netlist)) {
+param.list[[x]]<-netlist[[x]][[2]]}
+
+params=do.call(rbind,param.list)
+paramchi<-cbind(params,chi)
+
+
+netlist_nets<-NULL
+for (x in 1:length(netlist)) {
+netlist_nets[[x]]<-netlist[[x]][[1]]}
+
+return(list(param_chisq_data=paramchi,netlist=netlist_nets))
+ }
+
+if (length(netlist)==0){
+return("No networks were found to meet the criteria in the allotted number of iterations")
+ }
+}

@@ -1,0 +1,2344 @@
+#####################################################################################
+#this function finds the "best" parameters that generate networks
+#with the right ego network distribution and the right level of mixing 
+#between social groups
+#
+#inputs:
+#
+#params=initial coefficients for simulations
+#ns=number of simulations 
+#esp1=only used for hill-climbing method: if updated params does not improve
+#chi square value more than this margin, end algorithm
+#
+#max.iter= maximum number of iterations for alrogithm
+#delta=only used for hill-climbing method, how much coefficients should change for each change of coefficients 
+#delta1=only used for hill-climbing method, how much coefficinets should change if opt for 
+#multiple starting points (num.initial.params>1)
+
+#tableego=correct distribution of ego networks, if you want to evaluate ego network distribution for different 
+#subgroups, then tableego should be a list, with the distribution for the 1st, 2nd,... group in the 1st, 2nd, etc, position
+#
+#interval=interval between where simulations are taken from the sampler
+#burnin=number of simulations taken before begin sampling
+#formula=network formula to simulate networks
+#constraints=constraints to be passed to ERGM for simulations
+#sample=should the ego network disribution from the simulated networks be taken from a sample or a census?
+#ego.samp.size=if sample=T, how large should the sample be
+#initial.network=network where simiulations start from
+#constant=which coefficients (see params) are to be held constant throughout the updating process
+#pos.cols=which coefficients are allowed to be updated but are restricted to be positive
+#constant.homophily.change=which coefficients are held constant as the algorithm searches for a better fit 
+#for the ego network distribution but are allowed to vary to ensure the right level of homophily
+#
+
+#neg.cols=which coefficients are allowed to be updated but are restricted to be negative
+#threshold.triads=a value, if not NULL, that controls the number of simulations performed by stopping the simulations
+#only after the new network does not increase the number of closed triads substantially
+#the criteria value is equal to the relative number of triads that are closed that are added from one simulation to the next 
+#(relative to the number of closed triads from the previous netwrok) if it is smaller than threshold.triads, stop simulation
+#  
+#
+#max.alter=max number of alters the respondents were allowed to name-used  to calculate the ego network distribution 
+
+#egonet.data=only neccessary if the homophily parameters are updated-homophily paramaters are updated if
+#constant.homophily.change is not empty
+#;the dataset with empirical ego network data
+#
+#var.name.degree=only neccessary if the homophily parameters are updated
+#name of variable in egonet.data that has the degree of the respondents
+
+#var.name.characs=only neccessary if the homophily parameters are updated
+# a vector of variable names in egonet.data corresponding to the homophily characteristics
+#of the respondent
+
+#var.name.characs.alter=only neccessary if the homophily parameters are updated
+# a list, where each element is a vector of variable names egonet.data corresponding to the homophily characteristics
+#of the alters; in the same order as with the var.name.characs
+#old.weight=
+#
+#method=the method to find the best paratmers given the inputs; currently only "optimize" is an option
+#
+#no.nodecov=only needed if the homophily paramaters are updated: T or F, T if the updating process for the homophily coefficients
+#should take not take into account any nodal covariates 
+#
+#
+#diff.tableego.vector=a vector denoting subgroups which should be evaluated differently when looking at
+#chisquare value, or when comparing the empirical to the simulated ego network distribution 
+#default is NULL, everyone is evaluated under the same ego network distribution 
+#break_ifnot_improved=T/F should break if current chisquare not improved from previous chisquare
+#
+#useparallel=T/F, should use multiple cores
+#num.cores= number of cores to utilize of doing useparallel
+#requires egodistfunc and randdistfunc,adjusted.coefs.function
+#,case.control.data.function
+####################################################################################
+
+
+
+order.func=function(y){sort(y)[1:5]}
+
+reg.func=function(coefs,x){x=c(x,x^2)
+y=sum(coefs[1], x*coefs[2:length(coefs)]);abs(y) 
+}
+
+
+reg.func2<-
+function(coefs,x){x=c(x,x^2, prod(x))
+y=sum(coefs[1], x*coefs[2:length(coefs)]);abs(y) 
+}
+
+
+whole_network_function<-function(params,ns=5,esp1=1,max.iter=10,delta=1.5,delta1=.5,tableego
+,interval=100,burnin=100000,formula,constraints=~degreedist,
+sample=TRUE,ego.samp.size=1000,initial.network
+,constant=c(),pos.cols=c(),constant.homophily.change=c()
+,neg.cols=c(),threshold.triads=NULL,max.alter
+,egonet.data=NULL,var.name.degree=NULL,var.name.characs=NULL,var.name.characs.alter=NULL,resp.weights=NULL
+,method="optimize",no.nodecov=T
+,diff.tableego.vector=NULL,old.weight.mix=.25,raise.power.delta1=2,alpha=NULL,alpha.fixed=NULL,max.thres=5
+,break_ifnot_improved=F, useparallel=F, num.cores=2)
+{
+
+if (is.null(initial.network)==F){
+net=initial.network
+formula=as.formula(paste("net~",paste(formula)[[3]]))
+}
+
+if (is.null(initial.network)==T){
+net_name_temp=paste(formula)[[2]]
+initial.network=get(net_name_temp, envir=.GlobalEnv)
+#formula=as.formula(paste("net~",paste(formula)[[3]]))
+
+}
+
+if (is.null(alpha.fixed)){
+alpha.fixed=T
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+if ( length(grep("gwesp",form.list[[i]]))>0){
+    alpha.fixed=as.character(form.list[[i]][3])%in%c("T","TRUE")
+    }
+  }
+} #null alpha.fixed
+
+
+if (is.null(alpha)){
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+
+if ( length(grep("gwesp",form.list[[i]]))>0){
+alpha=  as.numeric(form.list[[i]][[2]])
+   }
+ }#i
+
+}#null alpha
+
+
+if (alpha.fixed==F){
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+if ( length(grep("gwesp",form.list[[i]]))>0){
+#form.list[[i]][3]=T
+form.list[[i]]=paste(formula(~gwesp(alpha,fixed=T))[2])
+    }
+  }
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+} #alpha.fixed=F
+
+
+
+#alpha<<-alpha
+
+
+if (length(constant.homophily.change)>0){
+#making initial conditional statement-are we going to update the homophily coefficients along the way or not?
+#here we are
+
+chisq<-0
+full.chidata.list<-list()
+
+
+ cons=rep(1,length(params))
+  cons[c(constant,constant.homophily.change)]=0
+
+constant=c(constant,constant.homophily.change)
+
+if (is.null(diff.tableego.vector)){
+ if (sample==FALSE){
+ ids<-c(1:as.numeric(initial.network[[2]][1]))
+ }
+if (sample==TRUE){
+ids<-sample(c(1:as.numeric(initial.network[[2]][1])),ego.samp.size,replace=TRUE)
+  }
+}
+
+
+
+if (!is.null(diff.tableego.vector)){
+val.diff.tab=sort(unique(diff.tableego.vector))
+num.groups.diff=length(val.diff.tab)
+
+ids.list=list()
+ if (sample==FALSE){
+ ids<-c(1:as.numeric(initial.network[[2]][1]))
+ }
+if (sample==TRUE){
+ids<-sample(c(1:as.numeric(initial.network[[2]][1])),ego.samp.size,replace=TRUE)
+   }
+
+samp.diff.tab=diff.tableego.vector[ids]
+for ( tu in 1:num.groups.diff){
+ids.list[[tu]]=(ids[samp.diff.tab%in% c(val.diff.tab[tu])])
+             }
+prop.diff.tab=unlist(lapply(ids.list,length))/ego.samp.size
+}
+
+
+sum.vars=summary(formula)
+name.vars=names(sum.vars) #getting name of variables in formula
+
+#bit of code to set up formula for case control logistic regression
+#putting in reference categories where appropriate
+
+temp.name.list=c()
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+
+mix=length(grep("mix",paste(form.list[[i]])))>0
+
+if (mix){
+
+temp.stats=sum.vars[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+temp.coefs=params[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+#only keep those within 1 value of max of temp.coefs or positive 
+temp.stats=temp.stats[ temp.coefs>(max(temp.coefs)-1)|temp.coefs>0 ]
+
+temp.name=names(which(temp.stats==max(temp.stats)))[1]
+temp.name2=strsplit(temp.name,paste("mix.",paste(form.list[[i]][2]),".",sep=""))[[1]][2]
+
+form.list[[i]][3]=temp.name2 #using the largest set as reference group in case control logistic regression
+temp.name.list[i]=temp.name
+ }
+}
+
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula.case=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+
+#getting name of variables in formula for case control logistic regression 
+name.vars.case=name.vars[!name.vars%in% temp.name.list]
+
+params.inputs=params
+params=c(params,alpha=alpha)
+
+if (alpha.fixed==T){
+constant=c(constant,length(params))
+}
+
+if (alpha.fixed==F){
+pos.cols=c(pos.cols,length(params))
+}
+
+
+name.vars2<-name.vars
+name.vars2[grep("gwesp", name.vars)]="gwesp"
+
+if (method=="optimize"){
+#simulating three sets of initial params
+#at extremes (high, low), and median of values allowed to vary
+
+#getting initial sim values
+
+iters=1
+param.ids=1:length(params)
+
+change.params=param.ids[!(param.ids %in%constant)]
+
+
+med=rep(NA,length(params))
+med[change.params]=params[change.params]
+
+#max=med+delta
+max=med
+max[!is.na(med)]=med[!is.na(med)]+delta
+#max[which(max>0)& which(1:length(max) %in% neg.cols) &!is.na(max)]=0 #making value=0 if can't be positive and value is >0
+max[which(max>0 & !is.na(max) & (1:length(max) %in% neg.cols) )]=0 #making value=0 if can't be positive and value is >0
+
+#min=med-delta
+min=med
+min[!is.na(med)]=med[!is.na(med)]-delta
+
+#min[which(min<0)& which(1:length(min) %in% pos.cols) &!is.na(min)]=0#making value=0 if can't be negative and value is <0
+min[which(min<0 & !is.na(min) & (1:length(min) %in% pos.cols) )]=0#making value=0 if can't be negative and value is <0
+
+params.mat=rbind(min[!is.na(min)],med[!is.na(med)],max[!is.na(max)])
+
+if (ncol(params.mat)==1){
+paramatrix<-t(matrix(rep(params,nrow(params.mat) ),c(length(params),nrow(params.mat))))
+paramatrix[,change.params]=params.mat[,1]
+
+id.theta.original=2
+}
+
+if (ncol(params.mat)>1){ #if more than 1 param to serach for-only do 3*number of params (randonmly selected) combos of params
+
+#params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*2,replace=T))
+
+y.row=0
+y.check=0
+
+while (y.row<round(length(change.params)*5)){params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*100,replace=T))
+y.row=nrow(params.mat2)
+y.check=y.check+1
+if (y.check==100){break}
+}
+
+
+if (y.row>12){
+params.mat2=params.mat2[1:12,]
+}
+
+emp=params.mat[2,]
+
+id.theta.original=which(apply(params.mat2,1,all.equal,emp)%in% "TRUE")
+
+if (length(id.theta.original)==0){params.mat2=rbind(params.mat2,emp)#make sure specified starting point is in the set
+
+id.theta.original=nrow(params.mat2)
+}
+
+paramatrix<-t(matrix(rep(params,nrow(params.mat2) ),c(length(params),nrow(params.mat2))))
+paramatrix[,change.params]=params.mat2
+
+}
+
+if (useparallel==F){
+chi.dat.list=list()
+for (x in 1:nrow(paramatrix)){#now looping through each row of possible values-simulating nets for each set of params
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)]; rm(alpha)
+alpha<-paramatrix[x,ncol(paramatrix)]
+
+#alpha<<-alpha
+
+#netchange<-simulate(formula, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=interval, burnin=burnin)
+max_expected_edges=summary(initial.network~edges)*10
+
+netchange<-simulate(formula, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+#updating intial network and params by mixing on groups 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree
+ ,var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,
+add.trans=F,sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+coefs[constant.homophily.change]=start.point
+
+
+half=round(ns/3)
+ half.1=round(half/2)
+ 
+chisq[2:half]<- 10000 #just a placeholder for now
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change]
+,formula=formula.case,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+#doing it again to tune it before actually simulating nets and keeping chi square values 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+
+
+  for (n in (half+1):ns){ #calculating ns chisquare values-starting from prevoius network 
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+ }#n
+
+
+
+if (id.theta.original==x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list(params=coefs,chisq=min(chisq[(half+1):ns]),tableego=table(randdist)) #should I have an option to output different ego dists by subgroup?
+if (alpha.fixed==F){
+summary.data<-list(params=coefs,chisq=min(chisq[(half+1):ns]),tableego=table(randdist),alpha=alpha) #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=min(chisq)
+params.keep=coefs
+min_chisq_current=min(chisq[(half+1):ns])
+}
+
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[(half+1):ns,]
+
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+chi.dat.list[[x]]=chi.dat
+#if (x==1){chi.dat.full.new=chi.dat}
+#if (x>1){chi.dat.full.new=rbind(chi.dat.full.new,chi.dat)}
+
+
+ }#x
+}#useparallel=F
+
+#now if useparalle=T
+if (useparallel==T){
+
+max_expected_edges=summary(initial.network~edges)*10
+
+
+cl <- makePSOCKcluster(num.cores)
+registerDoParallel(cl)
+vals.temp=1:nrow(paramatrix)
+
+temp_dat <- foreach(x = vals.temp, .export=c('egodistfunc', 'as.edgelist.func', 'randdistfunc',
+'adjusted.coefs.func', 'rearrange.func', 'delete.func', 'egofunc', 'slist',
+'case.control.data.function', 'diff.func','match.func','mix.func', 'which.func','order.func')) %dopar% {
+
+library(ergm)
+library(biglm)
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)]
+alpha<-paramatrix[x,ncol(paramatrix)]
+
+net=initial.network
+formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
+
+#formula.temp=as.formula(paste("initial.network~",paste(formula)[[3]]))
+
+netchange<-simulate(formula.temp, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+#updating intial network and params by mixing on groups 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree
+ ,var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,
+add.trans=F,sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+coefs[constant.homophily.change]=start.point
+
+
+half=round(ns/3)
+ half.1=round(half/2)
+ 
+chisq[2:half]<- 10000 #just a placeholder for now
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change]
+,formula=formula.case,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+#doing it again to tune it before actually simulating nets and keeping chi square values 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+
+
+  for (n in (half+1):ns){ #calculating ns chisquare values-starting from prevoius network 
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+ }#n
+
+if (id.theta.original==x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list(params=coefs,chisq=min(chisq[(half+1):ns]),tableego=table(randdist)) #should I have an option to output different ego dists by subgroup?
+if (alpha.fixed==F){
+summary.data<-list(params=coefs,chisq=min(chisq[(half+1):ns]),tableego=table(randdist),alpha=alpha) #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=min(chisq)
+params.keep=coefs
+min_chisq_current=min(chisq[(half+1):ns])
+}
+
+
+if (id.theta.original!=x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list() #should I have an option to output different ego dists by subgroup?
+if (alpha.fixed==F){
+summary.data<-list() #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=min(chisq)
+params.keep=NA
+min_chisq_current=NA
+}
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[(half+1):ns,]
+
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+list(chi.dat, summary.data=summary.data, params.keep=params.keep, min_chisq_current=min_chisq_current)
+
+}
+
+stopCluster(cl)
+
+summary.data <- temp_dat[[id.theta.original]]$summary.data
+params.keep <-temp_dat[[id.theta.original]]$params.keep
+min_chisq_current <- temp_dat[[id.theta.original]]$min_chisq_current
+
+
+chi.dat.list = lapply(temp_dat, '[[', 1) 
+} #if doing parallel processing
+
+chi.dat.full=do.call(rbind,chi.dat.list)
+#regression
+
+sq.vars=chi.dat.full[,2:ncol(chi.dat.full)]
+sq.vars=sq.vars^2
+
+chi.dat.full=cbind(chi.dat.full,sq.vars)
+
+if (length(change.params)>1){
+chi.dat.full=cbind(chi.dat.full, chi.dat.full[,2]*chi.dat.full[,3])
+}
+
+chi.dat.full.new=chi.dat.full
+
+reg<-lm(chi.dat.full[,1]~chi.dat.full[,2:ncol(chi.dat.full)] )
+
+reg.coefs=reg$coefficients
+reg.coefs[is.na(reg.coefs)]=0
+
+#optimizing regression equation to find values that minize chi square
+
+
+new.params=switch(paste(length(change.params)==1), "TRUE"=optimize(reg.func ,c(min(chi.dat.full.new[,2]),max(chi.dat.full.new[,2]))
+, coefs=reg.coefs  )$minimum
+,"FALSE"=optim( c(params.mat2[id.theta.original,]) , reg.func2, coefs=reg.coefs)$par)
+
+if (length(change.params)>0){#making sure not lareger (smaller) than max (min) value in input data
+
+max.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,max)
+min.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,min)
+
+new.params[new.params>max.values]=max.values[new.params>max.values]
+new.params[new.params<min.values]=min.values[new.params<min.values]
+}
+
+theta.original=params.keep #orginal params but updataed homophily coefficients
+params.original=params#original params
+params[change.params]=new.params #original params but putting in new term for term allowed to vary
+
+
+#next iteration expected chisq?
+#min_chisq_next <-reg.func(coefs=reg.coefs,x=new.params)
+
+min_chisq_next<-switch(paste(length(change.params)==1), "TRUE"=reg.func(coefs=reg.coefs,x=new.params)
+,"FALSE"=reg.func2(coefs=reg.coefs,x=new.params))
+
+
+
+#now do it again, until current chi value is better than new chi, or reach max iterations 
+
+for (iters in 2:max.iter){
+
+delta1.adjust=delta1/(raise.power.delta1^(iters-2))
+
+chi.dat.full.old=cbind(chi.dat.list[[id.theta.original]],chi.dat.list[[id.theta.original]][,2:ncol(chi.dat.list[[id.theta.original]])]^2)
+
+if (length(change.params)>1){
+chi.dat.full.old=cbind(chi.dat.full.old, chi.dat.full.old[,2]*chi.dat.full.old[,3])
+}
+
+med=rep(NA,length(params))
+med[change.params]=params[change.params]
+
+#max=med+delta1.adjust
+max=med
+max[!is.na(med)]=med[!is.na(med)]+delta1.adjust
+#max[which(max>0)& which(1:length(max) %in% neg.cols) &!is.na(max)]=0 #making value=0 if can't be positive and value is >0
+max[which(max>0 & !is.na(max) & (1:length(max) %in% neg.cols) )]=0 #making value=0 if can't be positive and value is >0
+
+#min=med-delta1.adjust
+min=med
+min[!is.na(med)]=med[!is.na(med)]-delta1.adjust
+#min[which(min<0)& which(1:length(min) %in% pos.cols) &!is.na(min)]=0
+min[which(min<0 & !is.na(min) & (1:length(min) %in% pos.cols) )]=0#making value=0 if can't be negative and value is <0
+
+params.mat=rbind(min[!is.na(min)],med[!is.na(med)],max[!is.na(max)])
+
+if (ncol(params.mat)==1){
+paramatrix<-t(matrix(rep(params,nrow(params.mat) ),c(length(params),nrow(params.mat))))
+paramatrix[,change.params]=params.mat[,1]
+id.theta.original=2
+}
+
+if (ncol(params.mat)>1){
+
+#params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*2,replace=T))
+
+y.row=0
+y.check=0
+
+while (y.row<round(length(change.params)*3.5)){params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*50,replace=T))
+y.row=nrow(params.mat2)
+y.check=y.check+1
+if (y.check==100){break}
+}
+
+if (y.row>12){
+params.mat2=params.mat2[1:12,]
+}
+
+emp=params.mat[2,]
+
+id.theta.original=which(apply(params.mat2,1,all.equal,emp)%in% "TRUE")
+
+if (length(id.theta.original)==0){params.mat2=rbind(params.mat2,emp)
+
+id.theta.original=nrow(params.mat2)
+ }
+
+paramatrix<-t(matrix(rep(params,nrow(params.mat2) ),c(length(params),nrow(params.mat2))))
+paramatrix[,change.params]=params.mat2
+
+}
+
+
+#name.vars=names(summary(formula))
+
+paramatrix.updated=paramatrix
+chi.dat.list=list()
+
+
+#if not use parallel
+if (useparallel==F){
+
+for (x in 1:nrow(paramatrix)){#looping over the possible values in paramatrix-simulating a sample of nets each time
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)];rm(alpha)
+alpha=paramatrix[x,ncol(paramatrix)]
+
+#alpha<<-alpha
+
+#netchange<-simulate(formula, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=interval, burnin=burnin)
+
+netchange<-simulate(formula, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+#formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+
+#updating intial network and params by mixing on groups 
+
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+coefs[constant.homophily.change]=start.point
+
+chisq[2:half]<- 10000 #just a placeholder for now
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+#doing it again to tune it before actually simulating nets and keeping chi square values 
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+
+
+
+  for (n in (half+1):ns){ #calculating ns chisquare values-starting from prevoius network 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+ }#n
+
+
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? coefs[constant.homophily.change]=start.point
+
+
+if (id.theta.original==x){
+#storing some info about iteration 
+old.params=coefs
+alpha.keep=alpha
+#chisq.new=min(chisq[(half+1):ns])
+min_chisq_current=min(chisq[(half+1):ns])
+
+tab=table(randdist)
+
+netchange_keep=netchange}
+
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[(half+1):ns,]
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+chi.dat.list[[x]]=chi.dat
+
+paramatrix.updated[x,constant.homophily.change]=coefs[constant.homophily.change]
+ }#x
+
+netchange=netchange_keep
+}#not using parallel
+
+if (useparallel==T){
+
+cl <- makePSOCKcluster(num.cores)
+registerDoParallel(cl)
+vals.temp=1:nrow(paramatrix)
+
+temp_dat <- foreach(x = vals.temp, .export=c('egodistfunc', 'as.edgelist.func', 'randdistfunc',
+'adjusted.coefs.func', 'rearrange.func', 'delete.func', 'egofunc', 'slist',
+'case.control.data.function', 'diff.func','match.func','mix.func', 'which.func','order.func')) %dopar% {
+
+library(ergm)
+library(biglm)
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)];rm(alpha)
+alpha=paramatrix[x,ncol(paramatrix)]
+
+net=initial.network
+formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
+
+#formula.temp=as.formula(paste("initial.network~",paste(formula)[[3]]))
+
+netchange<-simulate(formula.temp, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+#updating intial network and params by mixing on groups 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree
+ ,var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,
+add.trans=F,sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+coefs[constant.homophily.change]=start.point
+
+
+half=round(ns/3)
+ half.1=round(half/2)
+ 
+chisq[2:half]<- 10000 #just a placeholder for now
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change]
+,formula=formula.case,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+#doing it again to tune it before actually simulating nets and keeping chi square values 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval*half.1)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+
+
+#updating homoph coefs after 1/2 of sims 
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? don't update as estimated 
+coefs[constant.homophily.change]=start.point
+
+
+
+  for (n in (half+1):ns){ #calculating ns chisquare values-starting from prevoius network 
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+ }#n
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #what do about extreme values? coefs[constant.homophily.change]=start.point
+
+#if (id.theta.original==x){
+#storing some info about iteration 
+old.params=coefs
+alpha.keep=alpha
+min_chisq_current=min(chisq[(half+1):ns])
+
+tab=table(randdist)
+#}
+
+if (id.theta.original==x){
+netchange=netchange
+}
+
+if (id.theta.original!=x){
+netchange=NA
+}
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[(half+1):ns,]
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+chi.dat.list[[x]]=chi.dat
+
+
+list(chi.dat, old.params=old.params, alpha.keep=alpha.keep, min_chisq_current=min_chisq_current,
+tab=tab, netchange=netchange)
+
+}
+
+stopCluster(cl)
+
+old.params <- temp_dat[[id.theta.original]]$old.params
+alpha.keep <-temp_dat[[id.theta.original]]$alpha.keep
+min_chisq_current <- temp_dat[[id.theta.original]]$min_chisq_current
+
+tab <- temp_dat[[id.theta.original]]$tab
+
+netchange <- temp_dat[[id.theta.original]]$netchange
+
+chi.dat.list = lapply(temp_dat, '[[', 1) 
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+} #if use parallel
+
+
+chi.dat.full.new=do.call(rbind,chi.dat.list)
+
+
+#regression
+
+
+sq.vars=chi.dat.full.new[,2:ncol(chi.dat.full.new)]
+sq.vars=sq.vars^2
+
+chi.dat.full.new=cbind(chi.dat.full.new,sq.vars)
+
+if (length(change.params)>1){
+chi.dat.full.new=cbind(chi.dat.full.new, chi.dat.full.new[,2]*chi.dat.full.new[,3])
+}
+
+#if (chisq.new>chisq.old){
+chi.dat.full.new=rbind(chi.dat.full.new,chi.dat.full.old)
+#}
+
+chi.dat.full=rbind(chi.dat.full,chi.dat.full.new)
+
+
+reg<-lm(chi.dat.full.new[,1]~chi.dat.full.new[,2:ncol(chi.dat.full.new)] )
+
+reg.coefs=reg$coefficients
+reg.coefs[is.na(reg.coefs)]=0
+#optimize
+
+
+
+
+new.params=switch(paste(length(change.params)==1), "TRUE"=optimize(reg.func ,c(min(chi.dat.full.new[,2]),max(chi.dat.full.new[,2]))
+, coefs=reg.coefs  )$minimum
+
+,"FALSE"=optim( c(params.mat2[id.theta.original,]) , reg.func2, coefs=reg.coefs)$par)
+
+if (length(change.params)>0){#making sure not lareger (smaller) than max (min) value in input data
+
+max.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,max)
+min.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,min)
+
+new.params[new.params>max.values]=max.values[new.params>max.values]
+new.params[new.params<min.values]=min.values[new.params<min.values]
+}
+
+
+
+#old.params=params
+params[change.params]=new.params
+coefs=params[(1:length(params)-1)]
+rm(alpha);
+alpha=params[length(params)]
+
+#alpha<<-alpha
+
+#min_chisq_next <-reg.func(coefs=reg.coefs,x=new.params)
+
+min_chisq_next<-switch(paste(length(change.params)==1), "TRUE"=reg.func(coefs=reg.coefs,x=new.params)
+,"FALSE"=reg.func2(coefs=reg.coefs,x=new.params))
+
+#determine if break or keep going...
+#if breaking-if reached max iter or chi square not improved over min from previous iteration
+
+if ( (iters==max.iter) | ( (min_chisq_next  > min_chisq_current) & break_ifnot_improved==T) ) {
+
+if (alpha.fixed==T){
+names(old.params)=name.vars
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+if (alpha.fixed==F){
+names(old.params)=name.vars2
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab,alpha=alpha.keep)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=100, burnin=interval*4)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.init.maxedges=max_expected_edges) )
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #
+coefs[constant.homophily.change]=start.point
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=100, burnin=min(interval*2))
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=coefs[constant.homophily.change][abs(start.point)>max.thres] #
+coefs[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>5]=coefs[constant.homophily.change][abs(start.point)>5] #what do about extreme values? don't update as estimated poorly?
+coefs[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+
+ start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+ var.name.characs= var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,sim.net=netchange,coefs.base=coefs[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>5]=coefs[constant.homophily.change][abs(start.point)>5] #what do about extreme values? don't update as estimated poorly?
+coefs[constant.homophily.change]=start.point
+
+
+
+#calculating chisq on found params at end
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+
+
+break
+} #breaking
+
+
+#if keep going with another iteration-chi square better than before
+
+if ( (iters<max.iter) & ((min_chisq_next <= min_chisq_current) | break_ifnot_improved==F) ) {
+#update summary.data
+
+if (alpha.fixed==T){
+names(old.params)=name.vars
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+if (alpha.fixed==F){
+names(old.params)=name.vars2
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab,alpha=alpha.keep)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+
+min_chisq_previous=min_chisq_current
+
+}
+
+}#iters
+
+#full.chidata.list=list()
+
+chis=c(unlist(summary.data[seq(2,length(summary.data),by=length(dat))]),chisq)
+
+best.id=which(chis%in% min(chis))[1]
+
+if (best.id<length(chis)){best.params=summary.data[seq(1,length(summary.data),by=length(dat))][[best.id]]}
+if (best.id==length(chis)){best.params=coefs}
+
+
+if (alpha.fixed==T){
+full.chidata.list<-list(summary.iterations=summary.data,
+iterations=iters,final.solution.chisquare=chisq,final.solution.params=coefs,best.params=best.params,best.chisquare=chis[best.id]
+,last.network=netchange,chisq.data=chi.dat.full.new,last.optimization.coefs=paramatrix.updated)
+}
+
+if (alpha.fixed==F){
+
+if (best.id<length(chis)){best.alpha=summary.data[seq(4,length(summary.data),by=length(dat))][[best.id]]}
+if (best.id==length(chis)){best.alpha=alpha}
+
+full.chidata.list<-list(summary.iterations=summary.data,
+iterations=iters,final.solution.chisquare=chisq,final.solution.params=coefs,best.params=best.params,best.chisquare=chis[best.id]
+,last.network=netchange,chisq.data=chi.dat.full.new,last.optimization.coefs=paramatrix.updated,best.alpha=best.alpha,final.solution.alpha=alpha)
+}
+
+}#method=optimize
+
+}#update homophily coefficients=True
+###################################################################################################################
+
+
+
+
+#update homophily coeffiiceints=F
+if (length(constant.homophily.change)==0){
+#making initial conditional statement-are we going to update the homophily coefficients along the way or not?
+#here we are not updating coefficients along the way
+
+chisq<-0
+full.chidata.list<-list()
+
+
+ cons=rep(1,length(params))
+  cons[c(constant,constant.homophily.change)]=0
+
+constant=c(constant,constant.homophily.change)
+
+if (is.null(diff.tableego.vector)){
+ if (sample==FALSE){
+ ids<-c(1:as.numeric(initial.network[[2]][1]))
+ }
+if (sample==TRUE){
+ids<-sample(c(1:as.numeric(initial.network[[2]][1])),ego.samp.size,replace=TRUE)
+  }
+}
+
+
+
+if (!is.null(diff.tableego.vector)){
+val.diff.tab=sort(unique(diff.tableego.vector))
+num.groups.diff=length(val.diff.tab)
+
+ids.list=list()
+ if (sample==FALSE){
+ ids<-c(1:as.numeric(initial.network[[2]][1]))
+ }
+if (sample==TRUE){
+ids<-sample(c(1:as.numeric(initial.network[[2]][1])),ego.samp.size,replace=TRUE)
+   }
+
+samp.diff.tab=diff.tableego.vector[ids]
+for ( tu in 1:num.groups.diff){
+ids.list[[tu]]=(ids[samp.diff.tab%in% c(val.diff.tab[tu])])
+             }
+prop.diff.tab=unlist(lapply(ids.list,length))/ego.samp.size
+}
+
+
+sum.vars=summary(formula)
+name.vars=names(sum.vars) #getting name of variables in formula
+
+params.inputs=params
+params=c(params,alpha=alpha)
+
+if (alpha.fixed==T){
+constant=c(constant,length(params))
+}
+
+if (alpha.fixed==F){
+pos.cols=c(pos.cols,length(params))
+}
+
+
+name.vars2<-name.vars
+name.vars2[grep("gwesp", name.vars)]="gwesp"
+
+###########################################################
+
+if (method=="optimize"){
+#simulating three sets of initial params
+#at extremes (high, low), and median of values allowed to vary
+
+#getting initial sim values
+
+iters=1
+param.ids=1:length(params)
+
+change.params=param.ids[!(param.ids %in%constant)]
+
+
+med=rep(NA,length(params))
+med[change.params]=params[change.params]
+
+#max=med+delta
+max=med
+max[!is.na(med)]=med[!is.na(med)]+delta
+#max[which(max>0)& which(1:length(max) %in% neg.cols) &!is.na(max)]=0 #making value=0 if can't be positive and value is >0
+max[which(max>0 & !is.na(max) & (1:length(max) %in% neg.cols) )]=0 #making value=0 if can't be positive and value is >0
+
+#min=med-delta
+min=med
+min[!is.na(med)]=med[!is.na(med)]-delta
+#min[which(min<0)& which(1:length(min) %in% pos.cols) &!is.na(min)]=0#making value=0 if can't be negative and value is <0
+min[which(min<0 & !is.na(min) & (1:length(min) %in% pos.cols) )]=0#making value=0 if can't be negative and value is <0
+
+params.mat=rbind(min[!is.na(min)],med[!is.na(med)],max[!is.na(max)])
+
+if (ncol(params.mat)==1){
+paramatrix<-t(matrix(rep(params,nrow(params.mat) ),c(length(params),nrow(params.mat))))
+paramatrix[,change.params]=params.mat[,1]
+
+id.theta.original=2
+}
+
+if (ncol(params.mat)>1){ #if more than 1 param to serach for-only do 3*number of params (randonmly selected) combos of params
+
+#params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*2,replace=T))
+
+y.row=0
+y.check=0
+while (y.row<round(length(change.params)*3.5)){params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*6,replace=T))
+y.row=nrow(params.mat2)
+y.check=y.check+1
+if (y.check==100){break}
+}
+
+
+if (y.row>12){
+params.mat2=params.mat2[1:12,]
+}
+
+emp=params.mat[2,]
+
+id.theta.original=which(apply(params.mat2,1,all.equal,emp)%in% "TRUE")
+
+if (length(id.theta.original)==0){params.mat2=rbind(params.mat2,emp)#make sure specified starting point is in the set
+
+id.theta.original=nrow(params.mat2)
+}
+
+paramatrix<-t(matrix(rep(params,nrow(params.mat2) ),c(length(params),nrow(params.mat2))))
+paramatrix[,change.params]=params.mat2
+
+}
+
+
+if (useparallel==F){
+max_expected_edges=summary(initial.network~edges)*10
+
+chi.dat.list=list()
+for (x in 1:nrow(paramatrix)){#now looping through each row of possible values-simulating nets for each set of params
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)]; rm(alpha)
+alpha<-paramatrix[x,ncol(paramatrix)]
+
+#netchange<-simulate(formula, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=interval, burnin=burnin)
+
+netchange<-simulate(formula, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+
+
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+#updating intial network and params by mixing on groups 
+
+
+
+ 
+  for (n in 2:ns){ #calculating ns chisquare values-starting from prevoius network 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+
+ }#n
+
+
+
+if (id.theta.original==x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list(params=coefs,chisq=min(chisq),tableego=table(randdist)) #should I have an option to output different ego dists by subgroup?
+
+if (alpha.fixed==F){
+summary.data<-list(params=coefs,chisq=min(chisq),tableego=table(randdist),alpha=alpha) #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=mean(chisq)
+params.keep=coefs
+min_chisq_current=min(chisq)
+}
+
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+#chi.dat[,2:ncol(chi.dat)]=rep(coefs[change.params],each=nrow(chi.dat))
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+chi.dat.list[[x]]=chi.dat
+
+#if (x==1){chi.dat.full.new=chi.dat}
+#if (x>1){chi.dat.full.new=rbind(chi.dat.full.new,chi.dat)}
+
+ }#x
+}#not use parallel
+
+#now if useparalle=T
+if (useparallel==T){
+
+max_expected_edges=summary(initial.network~edges)*10
+
+cl <- makePSOCKcluster(num.cores)
+registerDoParallel(cl)
+vals.temp=1:nrow(paramatrix)
+
+temp_dat <- foreach(x = vals.temp, .export=c('egodistfunc', 'as.edgelist.func', 'randdistfunc',
+'adjusted.coefs.func', 'rearrange.func', 'delete.func', 'egofunc', 'slist',
+'case.control.data.function', 'diff.func','match.func','mix.func', 'which.func','order.func')) %dopar% {
+
+library(ergm)
+library(biglm)
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)]
+alpha<-paramatrix[x,ncol(paramatrix)]
+
+net=initial.network
+formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
+
+netchange<-simulate(formula.temp, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+  for (n in 2:ns){ #calculating ns chisquare values-starting from prevoius network 
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+ }#n
+
+if (id.theta.original==x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list(params=coefs,chisq=min(chisq),tableego=table(randdist)) #should I have an option to output different ego dists by subgroup?
+if (alpha.fixed==F){
+summary.data<-list(params=coefs,chisq=min(chisq),tableego=table(randdist),alpha=alpha) #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=min(chisq)
+params.keep=coefs
+min_chisq_current=min(chisq)
+}
+
+
+if (id.theta.original!=x){
+#storing some info about first iteration 
+names(coefs)=name.vars2
+summary.data<-list() #should I have an option to output different ego dists by subgroup?
+if (alpha.fixed==F){
+summary.data<-list() #should I have an option to output different ego dists by #subgroup?
+}
+#chisq.old=min(chisq)
+params.keep=NA
+min_chisq_current=NA
+}
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[,]
+
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+list(chi.dat, summary.data=summary.data, params.keep=params.keep, min_chisq_current=min_chisq_current)
+
+}
+
+stopCluster(cl)
+
+summary.data <- temp_dat[[id.theta.original]]$summary.data
+params.keep <-temp_dat[[id.theta.original]]$params.keep
+min_chisq_current <- temp_dat[[id.theta.original]]$min_chisq_current
+
+
+chi.dat.list = lapply(temp_dat, '[[', 1) 
+} #if doing parallel processing
+
+
+chi.dat.full=do.call(rbind,chi.dat.list)
+#regression
+
+sq.vars=chi.dat.full[,2:ncol(chi.dat.full)]
+sq.vars=sq.vars^2
+
+chi.dat.full=cbind(chi.dat.full,sq.vars)
+
+if (length(change.params)>1){
+chi.dat.full=cbind(chi.dat.full.new, chi.dat.full[,2]*chi.dat.full[,3])
+}
+
+
+chi.dat.full.new=chi.dat.full
+
+reg<-lm(chi.dat.full[,1]~chi.dat.full[,2:ncol(chi.dat.full)] )
+
+reg.coefs=reg$coefficients
+reg.coefs[is.na(reg.coefs)]=0
+
+new.params=switch(paste(length(change.params)==1), "TRUE"=optimize(reg.func ,c(min(chi.dat.full.new[,2]),max(chi.dat.full.new[,2]))
+, coefs=reg.coefs  )$minimum
+
+,"FALSE"=optim( c(params.mat2[id.theta.original,]) , reg.func2, coefs=reg.coefs)$par)
+
+if (length(change.params)>0){#making sure not lareger (smaller) than max (min) value in input data
+
+max.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,max)
+min.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,min)
+
+new.params[new.params>max.values]=max.values[new.params>max.values]
+new.params[new.params<min.values]=min.values[new.params<min.values]
+}
+
+theta.original=params.keep #orginal params but updataed homophily coefficients
+params.original=params#original params
+#params=params.keep #should we start next round of iterations at new coefs or original params?
+params[change.params]=new.params #original params but putting in new term for term allowed to vary
+
+#now do it again, until current chi value is better than new chi, or reach max iterations 
+
+#next iteration expected chisq?
+#min_chisq_next <-reg.func(coefs=reg.coefs,x=new.params)
+
+min_chisq_next<-switch(paste(length(change.params)==1), "TRUE"=reg.func(coefs=reg.coefs,x=new.params)
+,"FALSE"=reg.func2(coefs=reg.coefs,x=new.params))
+
+for (iters in 2:max.iter){
+#chi.dat.full.old=chi.dat.full.new
+
+chi.dat.full.old=cbind(chi.dat.list[[id.theta.original]],chi.dat.list[[id.theta.original]][,2:ncol(chi.dat.list[[id.theta.original]])]^2)
+
+if (length(change.params)>1){
+chi.dat.full.old=cbind(chi.dat.full.old, chi.dat.full.old[,2]*chi.dat.full.old[,3])
+}
+
+delta1.adjust=delta1/(raise.power.delta1^(iters-2))
+
+med=rep(NA,length(params))
+med[change.params]=params[change.params]
+
+#max=med+delta1.adjust
+max=med
+max[!is.na(med)]=med[!is.na(med)]+delta1.adjust
+#max[which(max>0)& which(1:length(max) %in% neg.cols) &!is.na(max)]=0 #making value=0 if can't be positive and value is >0
+max[which(max>0 & !is.na(max) & (1:length(max) %in% neg.cols) )]=0 #making value=0 if can't be positive and value is >0
+
+#min=med-delta1.adjust
+min=med
+min[!is.na(med)]=med[!is.na(med)]-delta1.adjust
+#min[which(min<0)& which(1:length(min) %in% pos.cols) &!is.na(min)]=0
+min[which(min<0 & !is.na(min) & (1:length(min) %in% pos.cols) )]=0#making value=0 if can't be negative and value is <0
+
+
+params.mat=rbind(min[!is.na(min)],med[!is.na(med)],max[!is.na(max)])
+
+if (ncol(params.mat)==1){
+paramatrix<-t(matrix(rep(params,nrow(params.mat) ),c(length(params),nrow(params.mat))))
+paramatrix[,change.params]=params.mat[,1]
+id.theta.original=2
+}
+
+if (ncol(params.mat)>1){
+
+#params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*2,replace=T))
+
+y.row=0
+y.check=0
+
+while (y.row<round(length(change.params)*3.5)){params.mat2=unique(apply(params.mat,2,sample,size=length(change.params)*6,replace=T))
+y.row=nrow(params.mat2)
+y.check=y.check+1
+if (y.check==100){break}
+}
+
+if (y.row>12){
+params.mat2=params.mat2[1:12,]
+}
+
+emp=params.mat[2,]
+
+id.theta.original=which(apply(params.mat2,1,all.equal,emp)%in% "TRUE")
+
+if (length(id.theta.original)==0){params.mat2=rbind(params.mat2,emp)
+
+id.theta.original=nrow(params.mat2)
+ }
+
+paramatrix<-t(matrix(rep(params,nrow(params.mat2) ),c(length(params),nrow(params.mat2))))
+paramatrix[,change.params]=params.mat2
+
+}
+
+
+#name.vars=names(summary(formula))
+
+
+chi.dat.list=list()
+
+if (useparallel==F){
+
+for (x in 1:nrow(paramatrix)){#looping over the possible values in paramatrix-simulating a sample of nets each time
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)];rm(alpha)
+alpha=paramatrix[x,ncol(paramatrix)]
+
+#netchange<-simulate(formula, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=interval, burnin=burnin)
+
+netchange<-simulate(formula, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+#formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+
+
+  for (n in 2:ns){
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#tu
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+
+ }#n
+
+
+
+if (id.theta.original==x){
+#storing some info about  iteration 
+#summary.data<-list(coefs,mean(chisq),table(randdist))
+#storing some info about iteration 
+old.params=coefs
+alpha.keep=alpha
+#chisq.new=min(chisq[(half+1):ns])
+min_chisq_current=min(chisq)
+
+tab=table(randdist)
+
+netchange_keep=netchange}
+
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+#chi.dat[,2:ncol(chi.dat)]=rep(coefs[change.params],each=nrow(chi.dat))
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+chi.dat.list[[x]]=chi.dat
+
+#if (x==1){chi.dat.full.new=chi.dat}
+#if (x>1){chi.dat.full.new=rbind(chi.dat.full.new,chi.dat)}
+
+ }#x
+
+netchange=netchange_keep
+
+}#not use parallel
+
+if (useparallel==T){
+
+cl <- makePSOCKcluster(num.cores)
+registerDoParallel(cl)
+vals.temp=1:nrow(paramatrix)
+
+temp_dat <- foreach(x = vals.temp, .export=c('egodistfunc', 'as.edgelist.func', 'randdistfunc',
+'adjusted.coefs.func', 'rearrange.func', 'delete.func', 'egofunc', 'slist',
+'case.control.data.function', 'diff.func','match.func','mix.func', 'which.func','order.func')) %dopar% {
+
+library(ergm)
+library(biglm)
+
+chi.dat=matrix(NA,nrow=ns,ncol=1+length(change.params))
+
+
+chisq=rep(NA,ns)
+coefs=paramatrix[x,(1:ncol(paramatrix)-1)];rm(alpha)
+alpha=paramatrix[x,ncol(paramatrix)]
+
+net=initial.network
+formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
+
+netchange<-simulate(formula.temp, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[1]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+chisq.diff=NA
+rand.list=list()
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+}
+
+chisq[1]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+}
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+
+  for (n in 2:ns){
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=10, burnin=interval)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq[n]<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#tu
+
+chisq[n]<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+
+ }#n
+
+#if (id.theta.original==x){
+#storing some info about iteration 
+old.params=coefs
+alpha.keep=alpha
+min_chisq_current=min(chisq)
+
+tab=table(randdist)
+#}
+
+if (id.theta.original==x){
+netchange=netchange
+}
+
+if (id.theta.original!=x){
+netchange=NA
+}
+
+#filling in dataset to eventually run regression and then optimize over 
+
+chi.dat[,1]=chisq
+chi.dat[,2:ncol(chi.dat)]=rep(paramatrix[x,change.params],each=nrow(chi.dat))
+
+
+#only keeping those runs after update of homoph coefs
+chi.dat=chi.dat[,]
+chi.dat=chi.dat[which(chi.dat[,1]%in%order.func(chi.dat[,1])),]#if want to limit lowest 5 chi square values for each input
+
+chi.dat.list[[x]]=chi.dat
+
+
+list(chi.dat, old.params=old.params, alpha.keep=alpha.keep, min_chisq_current=min_chisq_current,
+tab=tab, netchange=netchange)
+
+}
+
+stopCluster(cl)
+
+old.params <- temp_dat[[id.theta.original]]$old.params
+alpha.keep <-temp_dat[[id.theta.original]]$alpha.keep
+min_chisq_current <- temp_dat[[id.theta.original]]$min_chisq_current
+
+tab <- temp_dat[[id.theta.original]]$tab
+
+netchange <- temp_dat[[id.theta.original]]$netchange
+
+chi.dat.list = lapply(temp_dat, '[[', 1) 
+
+formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
+
+} #if use parallel
+
+
+chi.dat.full.new=do.call(rbind,chi.dat.list)
+
+
+#regression
+
+
+sq.vars=chi.dat.full.new[,2:ncol(chi.dat.full.new)]
+sq.vars=sq.vars^2
+
+chi.dat.full.new=cbind(chi.dat.full.new,sq.vars)
+
+if (length(change.params)>1){
+chi.dat.full.new=cbind(chi.dat.full.new, chi.dat.full.new[,2]*chi.dat.full.new[,3])
+}
+
+
+#if (chisq.new>chisq.old){
+chi.dat.full.new=rbind(chi.dat.full.new,chi.dat.full.old)
+#}
+
+chi.dat.full=rbind(chi.dat.full,chi.dat.full.new)
+
+reg<-lm(chi.dat.full.new[,1]~chi.dat.full.new[,2:ncol(chi.dat.full.new)] )
+
+reg.coefs=reg$coefficients
+reg.coefs[is.na(reg.coefs)]=0
+#optimize
+
+
+
+
+new.params=switch(paste(length(change.params)==1), "TRUE"=optimize(reg.func ,c(min(chi.dat.full.new[,2]),max(chi.dat.full.new[,2]))
+, coefs=reg.coefs  )$minimum
+
+,"FALSE"=optim( c(params.mat2[id.theta.original,]) , reg.func2, coefs=reg.coefs)$par)
+
+if (length(change.params)>0){#making sure not lareger (smaller) than max (min) value in input data
+
+max.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,max)
+min.values=apply(as.matrix(chi.dat.full.new[,2:(1+length(change.params))]),2,min)
+
+new.params[new.params>max.values]=max.values[new.params>max.values]
+new.params[new.params<min.values]=min.values[new.params<min.values]
+}
+
+
+
+#old.params=params
+params[change.params]=new.params
+coefs=params[(1:length(params)-1)]
+rm(alpha);
+alpha=params[length(params)]
+
+#min_chisq_next <-reg.func(coefs=reg.coefs,x=new.params)
+
+min_chisq_next<-switch(paste(length(change.params)==1), "TRUE"=reg.func(coefs=reg.coefs,x=new.params)
+,"FALSE"=reg.func2(coefs=reg.coefs,x=new.params))
+
+#determine if break or keep going...
+#if breaking-if reached max iter or chi square not improved over min from previous iteration
+
+if ( (iters==max.iter) | ( (min_chisq_next  > min_chisq_current) & break_ifnot_improved==T) ) {
+
+
+if (alpha.fixed==T){
+names(old.params)=name.vars
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+if (alpha.fixed==F){
+names(old.params)=name.vars2
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab,alpha=alpha.keep)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+
+#netchange<-simulate(formula2, theta0=c(coefs),
+#nsim=1, constraints=constraints,interval=100, burnin=interval*8)
+
+netchange<-simulate(formula2, coef=c(coefs),
+nsim=1, constraints=constraints, 
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.init.maxedges=max_expected_edges) )
+
+#calculating chisq on found params at end
+
+if (is.null(diff.tableego.vector)){
+randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq<-randdistfunc(randdist,tableego=tableego)[[1]]#calculating chi square value on ego network distribution
+}
+
+if (!is.null(diff.tableego.vector)){
+rand.list=list()
+
+chisq.diff=NA
+for (tu in 1:num.groups.diff){
+randdist<-egodistfunc(netchange,ids=ids.list[[tu]],max.alter=max.alter)
+randdist<-unlist(randdist)
+chisq.diff[tu]<-randdistfunc(randdist,tableego=tableego[[tu]])[[1]]#calculating chi square value on ego network distribution
+rand.list[[tu]]=randdist
+        }#i
+
+chisq<- sum(chisq.diff*prop.diff.tab) #averaging chisq over values for each subgroup
+randdist=unlist(rand.list)
+     }#differential tableego
+
+
+break
+} 
+
+#if keep going with another iteration-chi square better than before
+if ( (iters<max.iter) & ((min_chisq_next <= min_chisq_current) | break_ifnot_improved==F) ) {
+#update summary.data
+
+if (alpha.fixed==T){
+names(old.params)=name.vars
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+if (alpha.fixed==F){
+names(old.params)=name.vars2
+dat=list(params=old.params,chisq=min_chisq_current,tableego=tab,alpha=alpha.keep)
+temp.spots=(length(summary.data)+1):(length(summary.data)+length(dat))
+summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
+}
+
+min_chisq_previous=min_chisq_current
+
+}
+
+}#iters
+
+#full.chidata.list=list()
+
+chis=c(unlist(summary.data[seq(2,length(summary.data),by=length(dat))]),chisq)
+
+best.id=which(chis%in% min(chis))[1]
+
+if (best.id<length(chis)){best.params=summary.data[seq(1,length(summary.data),by=length(dat))][[best.id]]}
+if (best.id==length(chis)){best.params=coefs}
+
+if (alpha.fixed==T){
+full.chidata.list<-list(summary.iterations=summary.data,
+iterations=iters,final.solution.chisquare=chisq,final.solution.params=coefs,best.params=best.params,best.chisquare=chis[best.id]
+,last.network=netchange,chisq.data=chi.dat.full.new,last.optimization.coefs=paramatrix)
+}
+
+if (alpha.fixed==F){
+
+if (best.id<length(chis)){best.alpha=summary.data[seq(4,length(summary.data),by=length(dat))][[best.id]]}
+if (best.id==length(chis)){best.alpha=alpha}
+
+full.chidata.list<-list(summary.iterations=summary.data,
+iterations=iters,final.solution.chisquare=chisq,final.solution.params=coefs,best.params=best.params,best.chisquare=chis[best.id]
+,last.network=netchange,chisq.data=chi.dat.full.new,last.optimization.coefs=paramatrix,best.alpha=best.alpha,final.solution.alpha=alpha)
+}
+
+
+
+}#method=optimize
+###################################################
+
+   }#ends not using homophliy updating process conditional statement
+
+return(full.chidata.list)
+} #end function
+
+
+########################################################
+
+
+
+#################################################
+
+extract.function3<-function(num.starting.points=num.starting.points,
+min.chis){
+
+keep.chi<-0
+keep.params<-list()
+
+for (y in 1:num.starting.points){
+
+keep.chi[[y]]<-unlist(min.chis[[y]][[3]])
+keep.params[[y]]<-unlist(min.chis[[y]][[4]])
+} #y
+
+keep.params<-t(matrix(cbind(unlist(keep.params)),c(length(unlist(keep.params[1]))
+,num.starting.points)))
+
+data.chi.params<-cbind(keep.params,keep.chi)
+#data.chi.params<-data.chi.params[data.chi.params[,5]<min(keep.chi)+10,]
+return(data.chi.params)
+} 

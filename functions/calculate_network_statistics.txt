@@ -1,0 +1,304 @@
+
+
+IQV_func=function(vec,k=NULL){
+
+
+tab=table(vec)
+if (is.null(k)){k=length(tab)}
+tab=tab/sum(tab)
+k/(k-1)*(1-sum(tab^2))
+
+}
+
+pairwise_func=function(vector,hedge) {
+
+vertex.disjoint.paths(hedge,vector[1],vector[2])
+}
+
+
+#size.bicomp.groupscore=minimum size to calcualte bicomp on group
+#input is an igraph net object
+calculate_network_statistics=function(net,
+pairwise=F,pairwise_groups=F,look_within_groups=F
+,nsamp=5,nsamp_groups=10
+,characs.list=NULL,size.bicomp.groupscore=5){
+
+#library(sna)
+#library(network)
+#edges=c(t(edgelist))-1
+#edges2=c(t(cbind(edgelist[,2],edgelist[,1])))  -1
+
+#detach(package:sna);detach(package:network)
+#library(igraph)
+#net=graph(edges,n=size,directed=FALSE)
+
+
+#####
+#getting edges for heterogenity stuff. 
+edgelist=get.edgelist(net,names=F)+1
+edges=c(t(edgelist))-1
+edges2=c(t(cbind(edgelist[,2],edgelist[,1]))) 
+#####
+
+
+#isolates=as.numeric(isolates(friendsSem1))-1
+isolates=which(degree(net)==0)-1
+
+size=length(degree(net))
+###
+comp=biconnected.components(net)
+bicomp.size=max(unlist(lapply(lapply(comp$components, function(x) unique(as.vector(get.edges(net, x)))),length)))
+
+comps=clusters(net,mode=c("strong"))
+comps_table=table(comps$csize)
+
+comps_data=list(bicomp.size=bicomp.size,comps_table=comps_table,comp.size=max(as.numeric(names(comps_table))),size=size)
+
+#main.comp.ids=which(comps[[1]]==as.numeric(names(which(table(comps[[1]])==max(table(comps[[1]]))))))-1
+
+#distance
+#size= net[[1]]
+
+mean.distance.reach=average.path.length(net, directed=FALSE, unconnected=TRUE)
+path.hist=path.length.hist(net,directed=F)
+path.hist$unconnected=path.hist$unconnected
+total=sum(path.hist$res,path.hist$unconnected)
+
+percent_unconnected=path.hist$unconnected/total
+ss=cumsum(c(path.hist$res)/total)
+
+dist_data=list(mean.distance.reach=mean.distance.reach,path.hist=path.hist,percent_unconnected=percent_unconnected,ss=ss)
+
+
+#group structure/modularity
+
+eb=fastgreedy.community(net)
+steps=0:nrow(eb$merges)
+
+coms=community.to.membership(net,eb$merges,steps[which(eb$modularity==max(eb$modularity))])[[1]]
+membership=table(coms)
+
+mod=max(eb$modularity)
+num.membership=length(membership)
+num.membership.noiso=length(membership)-length(isolates)
+
+ties=NA
+for (x in 1:num.membership){ties[x]=nrow(get.edgelist(subgraph(net,which(coms==(x-1))-1)))}
+
+prop.within.groups=sum(ties)/nrow(get.edgelist(net))
+
+
+
+
+
+
+
+match.list=NA
+het.list=NA
+
+match.group.list=NA
+
+for (p in 1:length(characs.list)){
+
+k=length(unique(characs.list[[p]]))
+num=NA
+iqv=NA
+match=NA
+for (x in 1:num.membership){
+
+ids=which(coms==(x-1))
+iqv[x]= IQV_func(characs.list[[p]][ids],k=k)
+match[x]=sum(sample(characs.list[[p]][ids],10000,replace=T)== sample(characs.list[[p]][ids],10000,replace=T))/10000
+ num[x]=length(ids)
+}
+
+num[num<5]=0
+num=num/sum(num)
+het.list[p]=sum(iqv*num)
+match.group.list[p]=sum(match*num)
+match.list[p]=table(characs.list[[p]][edges+1]== characs.list[[p]][edges2+1])[2]/length(edges)
+   }
+
+
+names(match.list)=paste(names(characs.list),"_match",sep="")
+names(het.list)=paste(names(characs.list),"_het",sep="")
+names(match.group.list)=paste(names(characs.list),"_groupmatch",sep="")
+
+##
+
+##
+
+net.main=decompose.graph(net,mode="strong",min=comps_data$comp.size-1)[[1]]
+eb.main=fastgreedy.community(net.main)
+steps=0:nrow(eb.main$merges)
+
+#mod.values=unlist(lapply(steps,modularity.function,g=net,eb=eb))
+
+coms.main=community.to.membership(net.main,eb.main$merges,steps[which(eb.main$modularity==max(eb.main$modularity))])[[1]]
+membership.main=table(coms.main)
+
+
+mod.main=max(eb.main$modularity)
+num.membership.main=length(membership.main)
+mod.main=max(eb.main$modularity)
+
+ties.main=NA
+for (x in 1:num.membership.main){ties.main[x]=nrow(get.edgelist(subgraph(net.main,which(coms.main==(x-1))-1)))}
+
+prop.within.groups.main=sum(ties.main)/nrow(get.edgelist(net.main))
+
+
+mod.table=list(membership=membership,num.membership=num.membership,num.membership.noiso=num.membership.noiso,
+mod=mod,membership.main=membership.main,num.membership.main=num.membership.main,mod.main=mod.main 
+,prop.within.groups=prop.within.groups,prop.within.groups.main=prop.within.groups.main,het.list=het.list,match.list=match.list,match.group.list=match.group.list
+,mean.bicomp.groups=NA,med.bicomp.groups=NA)
+
+
+if (look_within_groups){
+#finding cohesion for each group-percent largest bicomp within group
+
+num.membership.calcbicomp=as.numeric(names(which(membership.main>=size.bicomp.groupscore)))
+
+
+#then groups larger than specified
+groups.bicomp.prop=NA
+groups.pair.mean=NA
+flag=0
+for (x in num.membership.calcbicomp){
+
+flag=flag+1
+temp.net=subgraph(net.main,which(coms.main==(x))-1)
+temp.size=length(which(coms.main==(x)))
+
+comp.group=biconnected.components(temp.net)
+
+bicomp.ids=(lapply(comp.group$components, function(x) unique(as.vector(get.edges(temp.net, x)))))
+
+temp.bicomp=max(unlist(lapply(bicomp.ids,length)))
+
+groups.bicomp.prop[flag]=temp.bicomp/temp.size
+
+#temp.ids=bicomp.ids[[which(unlist(lapply(bicomp.ids,length))==temp.bicomp)[1]]]
+#graph.cohesion(subgraph(temp.net,temp.ids))
+
+
+if (pariwise_groups) {
+temp.ids=unique(unlist(bicomp.ids))
+sampleids1<-sample(temp.ids,nsamp_groups,replace=T)
+sampleids2<-sample(temp.ids,nsamp_groups,replace=T)
+
+allnodes=cbind(sampleids1,sampleids2)
+allnodes=allnodes[allnodes[,1]!=allnodes[,2],]
+#allnodes=allnodes[!(allnodes[,1] %in% isolates) & !(allnodes[,2] %in% isolates),]
+
+pairdata<-apply(allnodes,1,pairwise_func,hedge=temp.net)
+
+
+groups.pair.mean[flag]<-mean(pairdata)
+  }
+
+}
+
+
+
+#throw out bicomponent values that are outlieres? 
+#groups.bicomp.prop
+
+
+mean.bicomp.groups=mean(groups.bicomp.prop)
+mean.pairwise.groups=mean(groups.pair.mean)
+
+med.bicomp.groups=median(groups.bicomp.prop)
+med.pairwise.groups=median(groups.pair.mean)
+
+
+
+mod.table=list(membership=membership,num.membership=num.membership,num.membership.noiso=num.membership.noiso,
+mod=mod,membership.main=membership.main,num.membership.main=num.membership.main,mod.main=mod.main 
+,prop.within.groups=prop.within.groups,prop.within.groups.main=prop.within.groups.main,het.list=het.list,match.list=match.list,match.group.list=match.group.list
+,mean.bicomp.groups=mean.bicomp.groups,med.bicomp.groups=med.bicomp.groups)
+
+
+if (pairwise_groups){
+mod.table=list(membership=membership,num.membership=num.membership,num.membership.noiso=num.membership.noiso,
+mod=mod,membership.main=membership.main,num.membership.main=num.membership.main,mod.main=mod.main 
+,prop.within.groups=prop.within.groups,prop.within.groups.main=prop.within.groups.main,het.list=het.list,match.list=match.list,match.group.list=match.group.list
+,mean.bicomp.groups=mean.bicomp.groups,med.bicomp.groups=med.bicomp.groups
+,mean.pairwise.groups=mean.pairwise.groups,med.pairwise.groups=med.pairwise.groups)
+   }
+
+
+}
+
+
+
+#pairwise connectivity
+
+
+if (pairwise){
+
+
+sampleids1<-sample(1:(net.main[[1]]-1),nsamp,replace=T)
+sampleids2<-sample(1:(net.main[[1]]-1),nsamp,replace=T)
+
+allnodes=cbind(sampleids1,sampleids2)
+allnodes=allnodes[allnodes[,1]!=allnodes[,2],]
+#allnodes=allnodes[!(allnodes[,1] %in% isolates) & !(allnodes[,2] %in% isolates),]
+
+pairdata<-apply(allnodes,1,pairwise_func,hedge=net.main)
+
+
+
+pair.mean<-mean(pairdata)
+
+pair.table<-table(unlist(pairdata))/(sum(table(unlist(pairdata))))
+
+#matrix(c(pair.mean,pair.table))
+
+output.pairwise<-data.frame(c("mean",as.numeric(names(pair.table))),
+matrix(c(pair.mean,pair.table))
+ )
+colnames(output.pairwise)<-c("Ind Paths","percentage")
+
+
+
+return(list(comps_data,dist_data,output.pairwise,mod.table))
+
+}
+
+#detach(package:igraph)
+  
+if (!pairwise){
+return(list(comps_data,dist_data,mod.table))
+  }
+  
+}
+##################
+
+#a little function to put together results 
+
+output_network_statistics=function(net,pairwise=F,pairwise_groups=F,look_within_groups=F
+,nsamp=5,nsamp_groups=10,characs.list=NULL,size.bicomp.groupscore=5){
+ 
+emp.stats= calculate_network_statistics(net=net,
+pairwise=pairwise,pairwise_groups=pairwise_groups,look_within_groups=look_within_groups
+,nsamp=nsamp,nsamp_groups=nsamp_groups
+,characs.list=characs.list,size.bicomp.groupscore=size.bicomp.groupscore)
+ 
+ 
+ emp.data=c(bicomp=emp.stats[[1]]$bicomp.size,comp=max(as.numeric(names(emp.stats[[1]]$comps_table))),
+ size=emp.stats[[1]]$size,percent_bicomp=emp.stats[[1]]$bicomp.size/emp.stats[[1]]$size
+,percent_comp=max(as.numeric(names(emp.stats[[1]]$comps_table)))/emp.stats[[1]]$size
+ ,dist=emp.stats[[2]]$mean.distance.reach,percent_unconnected=emp.stats[[2]]$percent_unconnected,percent_reachable5=emp.stats[[2]]$ss[5],
+ 
+ mod=emp.stats[[4]]$mod,num.groups.noiso=emp.stats[[4]]$num.membership.noiso,mod.maincomp=emp.stats[[4]]$mod.main,num.groups.maincomp=emp.stats[[4]]$num.membership.main,
+ prop.within.groups=emp.stats[[4]]$prop.within.groups,prop.within.groups.main=emp.stats[[4]]$prop.within.groups.main
+, pairwise.connected=emp.stats[[3]][1,2]
+#, emp.stats[[4]]$het.list,emp.stats[[4]]$match.list
+#,emp.stats[[4]]$match.group.list 
+)
+
+list(emp.data=emp.data,emp.stats=emp.stats)
+ }
+
+

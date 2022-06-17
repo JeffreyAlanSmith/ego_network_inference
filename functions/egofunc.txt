@@ -1,0 +1,108 @@
+slist<-list()
+
+slist[[1]]=numeric(0)
+slist[[2]]=0
+slist[[3]]=c(0,0)
+slist[[4]]=c(1,1)
+
+
+slist[[5]]=c(0,0,0)
+slist[[6]]=c(0,1,1)
+slist[[7]]=c(1,1,2)
+slist[[8]]=c(2,2,2)
+
+
+slist[[9]]=c(0,0,0,0)
+slist[[10]]=c(0,0,1,1)
+slist[[11]]=c(0,1,1,2)
+slist[[12]]=c(1,1,1,1)
+slist[[13]]=c(1,1,1,3)
+slist[[14]]=c(0,2,2,2)
+slist[[15]]=c(1,1,2,2)
+slist[[16]]=c(1,2,2,3)
+slist[[17]]=c(2,2,2,2)
+slist[[18]]=c(2,2,3,3)
+slist[[19]]=c(3,3,3,3)
+
+
+
+
+slist[[20]]=c(0,0,0,0,0)
+slist[[21]]=c(0,0,0,1,1)
+slist[[22]]=c(0,0,1,1,2)
+slist[[23]]=c(0,1,1,1,1)
+slist[[24]]=c(0,1,1,2,2)
+slist[[25]]=c(1,1,1,1,2)
+#need to be differentiated 
+slist[[26]]=c(1,1,2,2,2)
+slist[[27]]=c(1,1,2,2,2)
+#
+slist[[28]]=c(0,1,1,1,3)
+slist[[29]]=c(0,0,2,2,2)
+slist[[30]]=c(1,1,1,2,3)
+slist[[31]]=c(0,1,2,2,3)
+slist[[32]]=c(0,2,2,2,2)
+slist[[33]]=c(1,1,1,1,4)
+slist[[34]]=c(2,2,2,2,2)
+#same basic structures-need to differentiate them
+#35 without triangle, 36 with triangle
+slist[[35]]=c(1,2,2,2,3) 
+slist[[36]]=c(1,2,2,2,3)
+##
+slist[[37]]=c(1,1,2,3,3) 
+slist[[38]]=c(1,1,2,2,4) 
+slist[[39]]=c(0,2,2,3,3) 
+#also needs differentiating 
+slist[[40]]=c(2,2,2,3,3)
+slist[[41]]=c(2,2,2,3,3)
+##
+slist[[42]]=c(1,2,2,3,4)
+slist[[43]]=c(2,2,2,2,4)
+slist[[44]]=c(0,3,3,3,3)
+slist[[45]]=c(1,2,3,3,3)
+slist[[46]]=c(2,2,3,3,4)
+slist[[47]]=c(2,3,3,3,3)
+slist[[48]]=c(2,2,2,4,4)
+slist[[49]]=c(1,3,3,3,4)
+slist[[50]]=c(3,3,3,3,4)
+slist[[51]]=c(2,3,3,4,4)
+slist[[52]]=c(3,3,4,4,4)
+slist[[53]]=c(4,4,4,4,4)
+
+
+egofunc<-function(randegos) 
+ {
+
+
+####################################################################################################
+#this function is used by fullegofunction to get distribution of simulated networks
+#randegos is the list of ego networks
+#output is the ego net distribution
+#
+#
+#
+#
+###################################################################################################
+#s20_s53<-0
+
+# getting the distribution of types of ego networks with 5 alters-34 possibilities
+# labled as 20-53
+# slist<-s 
+
+
+dist=sort(rowSums(randegos)[-1]-1)
+ randdist=which(unlist(lapply(slist,identical,sort(dist))))
+
+
+if (length(randdist)>1){
+
+randdist=randdist[1]+triad.census(randegos[2:6,2:6])[16]
+
+}
+
+randdist
+ 
+}
+
+
+

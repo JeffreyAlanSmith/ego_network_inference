@@ -1,0 +1,101 @@
+#code to estimate initial homophily coefficients from ego network data
+#data=input ego network data
+#var.name.degree=name of variable in data that has the degree of the respondents
+#var.name.characs= vector of names of characterisictics for ego
+#resp.weights=vector of weights to create representative population  (or NULL)
+#var.name.characs.alter=list of variable names for alter characteristics, same order as var.name.charac
+#max.control.data.N=max size used when constructing baseline random comparison
+#in case control model. 
+
+estimate_initial_homophily_coefs=function(formula,data,var.name.degree,var.name.characs,
+case.control.type="weighted.random.matching",
+var.name.characs.alter,resp.weights=NULL,max.control.data.N=100000){
+
+sum.vars=summary(formula)
+name.vars=names(sum.vars) #getting name of variables in formula
+
+homoph=unique(c(grep("mix",name.vars),grep("match",name.vars)))
+
+#bit of code to set up formula for case control logistic regression
+#putting in reference categories where appropriate
+
+temp.name.list=c()
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+
+mix=length(grep("mix",paste(form.list[[i]])))>0
+
+if (mix){
+
+temp.stats=sum.vars[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+temp.name=names(which(temp.stats==max(temp.stats)))[1]
+temp.name2=strsplit(temp.name,paste("mix.",paste(form.list[[i]][2]),".",sep=""))[[1]][2]
+
+form.list[[i]][3]=temp.name2 #using the largest set as reference group in case control logistic regression
+temp.name.list[i]=temp.name
+ }
+}
+
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula.case=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+case.list=case.control.data.create.vars(data=data,var.name.degree=var.name.degree,
+,var.name.characs=var.name.characs,case.control.type=case.control.type,
+,var.name.characs.alter=var.name.characs.alter,resp.weights=resp.weights,formula=formula.case,max.control.data.N=max.control.data.N)
+
+mod1<-summary(bigglm(case.list[[2]],data=case.list[[1]],family=binomial(link="logit"),maxit=30))
+
+coefs=mod1$mat[,1]
+
+case.list=case.control.data.create.vars(data=data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type=case.control.type,
+,var.name.characs.alter=var.name.characs.alter,resp.weights=resp.weights,formula=formula.case,
+max.control.data.N=nrow(case.list[[1]][case.list[[1]]$y==1,]) )
+
+
+name.list2=attr(terms.formula(formula.case),"variables")
+
+form.list2=list()
+
+for (i in 3:length(name.list)){
+form.list2[[i]]=attr(terms.formula(formula.case),"variables")[[i]]
+
+mix=length(grep("mix",paste(form.list2[[i]])))>0
+
+if (mix){
+form=as.formula(paste("y","~","mix.",paste(form.list2[[i]][2]),".",sep=""))
+mod2<-summary(bigglm(form,data=case.list[[1]],family=binomial(link="logit"),maxit=30, quiet=T))
+
+c1=mod2$mat[1,1]
+names(c1)=temp.name.list[grep(paste(form.list2[[i]][2]),temp.name.list) ]
+ coefs=c(coefs,c1)
+  }
+}
+
+coefs[coefs>10]=10
+coefs[coefs<(-10)]=-10
+
+marker.coefs=unlist(lapply(name.vars,which.func,names(coefs)))
+coefs=coefs[marker.coefs]
+
+
+miss.id=which(!name.vars[homoph] %in% names(coefs))
+if (length(miss.id)>0){
+
+names.coefs=c(names(coefs),name.vars[homoph][miss.id])
+coefs=c(coefs,rep(0,length(miss.id)))
+
+names(coefs)=names.coefs
+marker.coefs=unlist(lapply(name.vars,which.func,names(coefs)))
+coefs=coefs[marker.coefs]
+
+}
+
+return(coefs)
+}

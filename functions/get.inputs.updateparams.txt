@@ -1,0 +1,39 @@
+get.inputs.updateparams=function(formula){
+
+sum.vars=summary(formula)
+name.vars=names(sum.vars) #getting name of variables in formula
+
+temp.name.list=c()
+form.list=c()
+name.list=attr(terms.formula(formula),"variables")
+
+for (i in 3:length(name.list)){
+form.list[[i]]=attr(terms.formula(formula),"variables")[[i]]
+
+mix=length(grep("mix",paste(form.list[[i]])))>0
+
+if (mix){
+
+temp.stats=sum.vars[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+temp.coefs=params[grep("mix",name.vars)[ which(grep("mix",name.vars) %in%grep(paste(form.list[[i]])[2],name.vars))]]
+
+#only keep those within 1 value of max of temp.coefs or positive 
+temp.stats=temp.stats[ temp.coefs>(max(temp.coefs)-1)|temp.coefs>0 ]
+
+temp.name=names(which(temp.stats==max(temp.stats)))
+temp.name2=strsplit(temp.name,paste("mix.",paste(form.list[[i]][2]),".",sep=""))[[1]][2]
+
+form.list[[i]][3]=temp.name2 #using the largest set as reference group in case control logistic regression
+temp.name.list[i]=temp.name
+ }
+}
+
+
+form.list=paste(unlist(form.list),collapse="+")
+net.name=paste(formula[[2]])
+formula.case=as.formula(paste(net.name, "~",form.list)) #updating formula to use in case control logistic regression 
+
+name.vars.case=name.vars[!name.vars%in% temp.name.list]
+list(formula.case=formula.case,name.vars.case=name.vars.case)
+}

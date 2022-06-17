@@ -1,0 +1,33 @@
+#########################################################################
+#two functions used by create_netlist_function to determine cutoff for chisq
+#and to actually get the proper data out of the simulated networks
+#
+#
+#input is called from create_netlist_function
+########################################################################## 
+
+
+
+cutofffunction<-function(chisqlist,cutoff,ns)
+
+{
+indchisq<-data.frame(cbind(unlist(chisqlist),c(1:ns)))
+cut<-indchisq[indchisq$X1<cutoff,][,2] 
+cut
+}
+
+
+netsfunc<-function(datakeepnets,chi.dist,chisqlist,paramatrix,realdist)
+{
+
+net<-((chi.dist[[datakeepnets[1]]][[2]][[datakeepnets[2]]]))
+params<-paramatrix[datakeepnets[1],]
+chisqvalue<-chisqlist[[datakeepnets[1]]][datakeepnets[2]]
+
+distcompare<-unlist(chi.dist[[datakeepnets[1]]][[1]][[datakeepnets[2]]][[2]])
+comparedist<-data.frame(cbind(distcompare,realdist))
+
+list(net,params,chisqvalue,comparedist)
+
+}
+

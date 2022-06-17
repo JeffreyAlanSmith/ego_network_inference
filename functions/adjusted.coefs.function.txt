@@ -1,0 +1,366 @@
+#function that takes input simulation and outputs coefs of how much over empirical values
+#using case control logisitc, case control regression
+#data=ego network data, of form chara charac1, charac2, etc.; also have ties alter info, weights and possibly other info
+#var.name.degree=#name of variable in data that has the degree of the respondents
+#var.name.characs= vector of names of characterisictics for homophily model-case control logistic
+#case.control.type='simulated.data', when just running case.control.data.function, other possible options
+#var.name.characs.alter=list of variable names for alter characteristics, same order as var.name.charac
+#add.trans=should put transitive measure onto dataset, no for simulated data
+#impute.trans.control=should put some kind of simulated transitive onto the control part of data=F here
+#sim.net=simulated network from which the control part will be drawn
+#coefs.base=coefficients used in ergm simulation 
+#formula=ergm formula used to simulate networks
+#name.vars=name of terms used in simulation (see formula)
+#name.vars.case=name of terms used in case control logistic regression (based on formula.case)
+#no.nodecov=T or F, T if the updating process for the homophily coefficients
+#should take not take into account any nodal covariates 
+
+#max.alter=max number of alters the respondents were allowed to name
+
+which.func=function(x,y){which(x==y)}
+
+adjusted.coefs.func=function(data,var.name.degree,var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter,add.trans=F,sim.net,coefs.base
+,formula,name.vars=NULL,name.vars.case=NULL,no.nodecov=T,max.alter=NULL
+,resp.weights=NULL,output.weights=F,old.weight.diff=0,old.weight.mix=0,old.weight.match=0){
+
+#getting var.type
+
+var.type=NA
+for (i in 1:length(var.name.characs)){
+
+ids=grep(var.name.characs[i],attr(terms.formula(formula),"variables"))
+abs=grep("absdiff",attr(terms.formula(formula),"variables"))
+match=grep("nodematch",attr(terms.formula(formula),"variables"))
+mix=grep("nodemix",attr(terms.formula(formula),"variables"))
+id.type=max(c(1*as.numeric(sum(ids %in%abs)>0)
+,2*as.numeric(sum(ids %in%match)>0)
+,3*as.numeric(sum(ids %in%mix)>0)
+))
+
+var.type[i]=switch(paste(id.type),"0"=NA,"1"="absdiff","2"="nodematch","3"="nodemix")
+}
+
+
+#getting nodecov and nodefactor-if include nodecovariate (from formula)
+var.nodecov=NA
+for ( i in 1:length(var.name.characs)){
+ids=grep(var.name.characs[i],attr(terms.formula(formula),"variables"))
+node=grep("nodecov",attr(terms.formula(formula),"variables"))
+ids=ids[ids %in% node]
+
+var.nodecov[i]=ifelse(length(ids)>0,TRUE,FALSE)
+}
+
+var.nodefactor=NA
+for ( i in 1:length(var.name.characs)){
+ids=grep(var.name.characs[i],attr(terms.formula(formula),"variables"))
+node=grep("nodefactor",attr(terms.formula(formula),"variables"))
+ids=ids[ids %in% node]
+
+var.nodefactor[i]=ifelse(length(ids)>0,TRUE,FALSE)
+}
+
+
+#getting if nodemtach is differential diff
+node.diff=NA
+
+for ( i in 1:length(var.name.characs)){
+ids=grep(var.name.characs[i],attr(terms.formula(formula),"variables"))
+node=grep("diff",attr(terms.formula(formula),"variables"))
+ids=ids[ids %in% node]
+node.diff[i]=ifelse(length(ids)>0,TRUE,FALSE)
+}
+
+
+
+
+#calculate max.alter if NULL
+if (is.null(max.alter)){max.alter=max(unlist(lapply(var.name.characs.alter,length)))}
+
+#note if any of the alter data is missing 
+#i.e. may not have degree of alter but could be included as nodal covariate
+
+miss.ids=unlist(lapply(lapply(var.name.characs.alter,is.na),sum))
+miss.ids=which(miss.ids==1)
+
+for (i in miss.ids){
+
+var.name.characs.alter[[i]]=rep(var.name.characs[i],max.alter)
+}
+
+
+#getting case control dataset
+case.control.data=case.control.data.function(data=data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type=case.control.type
+,var.name.characs.alter=var.name.characs.alter,add.trans=add.trans,control.type="None",
+sim.net=sim.net,resp.weights=resp.weights,output.weights=output.weights)
+
+#dealing with degree-if one of the input variables is degree cap it at the max of the empirical
+deg=NA
+for ( i in 1:length(var.name.characs)){
+
+deg[i]=all.equal(data[,var.name.characs[i]],data[,var.name.degree])[1]
+}
+
+
+id.deg=which(deg==TRUE)
+if (length(id.deg)>0){
+
+max.deg=max(data[,var.name.characs[id.deg]],na.rm=T)
+
+case.control.data[case.control.data[,paste(var.name.characs[id.deg],1,sep="")]>max.deg,paste(var.name.characs[id.deg],1,sep="")]=max.deg
+case.control.data[case.control.data[,paste(var.name.characs[id.deg],2,sep="")]>max.deg,paste(var.name.characs[id.deg],2,sep="")]=max.deg
+
+}
+
+
+#if (is.null(name.vars.case)){#get name of variables in formula if NULL
+#name.vars.case=names(summary(formula))
+#}
+
+
+#making sure equal number of 1's and 0s when running regression below
+reduce.dat=na.omit(case.control.data[case.control.data$y==1,]) #take out missing data here?
+
+case.control.data=rbind(reduce.dat[sample(1:nrow(reduce.dat),nrow(case.control.data[case.control.data$y==0,]),prob=reduce.dat[,"weights.resp"],replace=T),]
+,case.control.data[case.control.data$y==0,])
+
+
+#creating variables-depending on nodematch, mix, of absdiff
+for (i in 1:length(var.name.characs)){
+if (!(is.na(var.type[i]))){
+
+if (var.type[i]=="absdiff") {
+case.control.data[,paste("absdiff",".",var.name.characs[i],sep="")]=abs(case.control.data[,paste(var.name.characs[i],"1",sep="")]-case.control.data[,paste(var.name.characs[i],"2",sep="")])
+     }
+
+if (var.type[i]=="nodematch") {
+
+ if (node.diff[i]==F){
+case.control.data[,paste("nodematch.",var.name.characs[i],sep="")]=as.numeric(case.control.data[,paste(var.name.characs[i],"1",sep="")]==case.control.data[,paste(var.name.characs[i],"2",sep="")])
+                 }
+
+ if (node.diff[i]==T){#creating factor appropriate for differential nodematch 
+
+match=as.numeric(case.control.data[,paste(var.name.characs[i],"1",sep="")]==case.control.data[,paste(var.name.characs[i],"2",sep="")])
+
+case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")]=as.character(case.control.data[,paste(var.name.characs[i],"1",sep="")])
+
+case.control.data[match==0&is.na(match)==F&is.na(case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")])==F,
+paste("nodematch.",var.name.characs[i],".",sep="")]="no match"
+
+case.control.data[is.na(case.control.data[,paste(var.name.characs[i],"1",sep="")])|is.na(case.control.data[,paste(var.name.characs[i],"2",sep="")]),paste("nodematch.",var.name.characs[i],".",sep="")]=NA
+case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")]=as.factor(case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")])
+case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")]=relevel(case.control.data[,paste("nodematch.",var.name.characs[i],".",sep="")],"no match")
+#relevling to make "no match" the base
+                 }
+   }#nodematch
+
+if (var.type[i]=="nodemix"){
+#need to sort data to have name in same order
+
+temp.dat1=(data.frame(case.control.data[,paste(var.name.characs[i],"1",sep="")],case.control.data[,paste(var.name.characs[i],"2",sep="")]))
+#id=temp.dat1[,1]==temp.dat1[,2]
+#id.not=!id
+
+n.mix=unique(c(names(table(temp.dat1[,1])),names(table(temp.dat1[,2]))))
+r.mix=rank(n.mix)
+
+temp.dat=temp.dat1
+temp.dat[,1]=as.numeric(as.character(factor(temp.dat1[,1],levels=n.mix,labels=r.mix)))
+temp.dat[,2]=as.numeric(as.character(factor(temp.dat1[,2],levels=n.mix,labels=r.mix)))
+
+
+id2=temp.dat[,1]>temp.dat[,2]
+#id1=temp.dat[,1]<temp.dat[,2]
+rm(temp.dat);gc()
+
+id2[is.na(id2)]=FALSE
+
+t2=temp.dat1[id2,2]
+t1=temp.dat1[id2,1]
+
+temp.dat1[id2,2]=t1
+temp.dat1[id2,1]=t2
+
+var=paste(temp.dat1[,1],temp.dat1[,2],sep=".")
+case.control.data[,paste("mix.",var.name.characs[i],".",sep="")]= var
+
+#taking out NA's
+
+case.control.data[is.na(case.control.data[,paste(var.name.characs[i],"1",sep="")])|is.na(case.control.data[,paste(var.name.characs[i],"2",sep="")]),paste("mix.",var.name.characs[i],".",sep="")]=NA
+case.control.data[,paste("mix.",var.name.characs[i],".",sep="")]=as.factor(case.control.data[,paste("mix.",var.name.characs[i],".",sep="")])
+
+#figuring out which is base name
+#names.ivar=names(summary(sim.net~nodemix(var.name.characs[i],base=0)))
+names.ivar=names(summary(sim.net~nodemix(var.name.characs[i], levels2=NULL)))
+
+base.name=strsplit(names.ivar[which(!names.ivar%in%name.vars.case)],paste("mix.",var.name.characs[i],".",sep=""))[[1]][2]
+
+case.control.data[,paste("mix.",var.name.characs[i],".",sep="")]=relevel(case.control.data[,paste("mix.",var.name.characs[i],".",sep="")],base.name)
+
+    }#mix
+}
+}#i
+
+
+#dealing with node factors
+for (i in 1:length(var.nodefactor)){
+
+if (var.nodefactor[i]==FALSE){}
+
+if (var.nodefactor[i]==TRUE){
+
+case.control.data[,paste(var.name.characs[i],1,sep="")]=factor(case.control.data[,paste(var.name.characs[i],1,sep="")])
+
+#names.ivar=names(summary(sim.net~nodefactor(var.name.characs[i],base=0)))
+names.ivar=names(summary(sim.net~nodefactor(var.name.characs[i],levels=NULL)))
+
+base.name=strsplit(names.ivar[which(!names.ivar%in%name.vars.case)],paste("nodefactor.",var.name.characs[i],".",sep=""))[[1]][2]
+
+case.control.data[,paste(var.name.characs[i],1,sep="")]=relevel(case.control.data[,paste(var.name.characs[i],"1",sep="")],base.name)
+
+   }
+
+}
+
+if (length(miss.ids)>0){#if have missing variables for alter, take out that variable and any absdiff, nodematch, etc. 
+
+var.miss=paste(var.name.characs[miss.ids],2,sep="")
+for (i in 1:length(var.miss)){
+col.id=-which(colnames(case.control.data)==var.miss[i])
+ if (length(col.id)>0){
+ case.control.data=case.control.data[,col.id]}
+  }
+
+var.miss=paste("absdiff",".",var.name.characs[miss.ids],sep="")
+for (i in 1:length(var.miss)){
+col.id=-which(colnames(case.control.data)==var.miss[i])
+ if (length(col.id)>0){
+ case.control.data=case.control.data[,col.id]}
+  }
+
+var.miss=paste("nodematch",".",var.name.characs[miss.ids],sep="")
+for (i in 1:length(var.miss)){
+col.id=-which(colnames(case.control.data)==var.miss[i])
+ if (length(col.id)>0){
+ case.control.data=case.control.data[,col.id]}
+  }
+
+var.miss=paste("mix",".",var.name.characs[miss.ids],".",sep="")
+for (i in 1:length(var.miss)){
+col.id=-which(colnames(case.control.data)==var.miss[i])
+ if (length(col.id)>0){
+ case.control.data=case.control.data[,col.id]}
+  }
+
+}
+
+
+#getting name-which mix, match,absdiff
+cnames=colnames(case.control.data[1:2,])
+cnames.diff=cnames[c(grep("absdiff",cnames))]
+cnames.match=cnames[c(grep("match",cnames))]
+cnames.mix=cnames[c(grep("mix",cnames))]
+
+#adding one to any absdiff
+
+if (length(cnames.diff)>0){
+case.control.data[,cnames.diff]=case.control.data[,cnames.diff]+1
+}
+
+
+
+
+
+coefs.sim.mat=c(unlist(lapply(cnames.diff,diff.func,dat=case.control.data))
+,unlist(lapply(cnames.match,match.func,dat=case.control.data)),unlist(lapply(cnames.mix,mix.func,dat=case.control.data)) )
+
+
+###getting starting point for next simluations 
+
+#coefs.sim.mat=summary(coefs.sim)$mat[,1]
+
+#coefs.temp=rep(0,length(coefs.base))
+#names(coefs.temp)=name.vars
+
+name.coefs=names(coefs.sim.mat)
+marker.coefs=as.numeric(lapply(name.vars,which.func,name.coefs   ))
+
+coefs.sim.mat=coefs.sim.mat[marker.coefs]
+coefs.sim.mat[is.na(coefs.sim.mat)]=0
+
+coefs.upper.limit=coefs.sim.mat+coefs.base
+#names(coefs.upper.limit)=name.vars
+
+weights=rep(0,length(coefs.upper.limit))
+
+weights[grep("absdiff",name.vars)]=old.weight.diff
+weights[grep("mix",name.vars)]=old.weight.mix
+weights[grep("match",name.vars)]=old.weight.match
+
+start.point=(weights*coefs.base+(1-weights)*coefs.upper.limit)
+
+
+return(start.point)
+}
+
+
+
+
+
+###################################
+#function used in above function to run separate 
+diff.func=function(name,dat){
+form.temp=formula(paste("y","~",name))
+
+model2<-bigglm(form.temp
+,data=dat,family=binomial(link="logit"),maxit=30, quiet=T)
+
+sum.model=summary(model2)[[2]]
+c1=sum.model[1:nrow(sum.model),1][2]
+c1
+}
+
+
+match.func=function(name,dat){
+form.temp=formula(paste("y","~",name))
+
+model2<-bigglm(form.temp
+,data=dat,family=binomial(link="logit"),maxit=30, quiet=T)
+
+sum.model=summary(model2)[[2]]
+c1=sum.model[1:nrow(sum.model),1][2:nrow(sum.model)]+sum.model[1,1]
+}
+
+
+mix.func=function(name,dat){
+form.temp=formula(paste("y","~",name))
+
+tab=table(dat[,name],dat[,"y"])[,1]
+name.add=names(tab)[which(tab==0)]
+
+if (length(name.add)>0){
+
+for (i in 1:length(name.add)){
+reduce.dat=dat[dat[,name]%in%name.add[i],][1:1,]
+reduce.dat[,"y"]=0
+dat=rbind(dat,reduce.dat)
+
+  }
+}
+
+model2<-bigglm(form.temp
+,data=dat,family=binomial(link="logit"),maxit=30,quiet=T)
+
+#adding in intercept here for mixing terms?
+sum.model=summary(model2)[[2]]
+c1=c(sum.model[1,1],sum.model[2:nrow(sum.model),1]+sum.model[1,1])
+
+temp.name=paste(name,levels(dat[,name])[1],sep="")
+names(c1)[1]=temp.name
+c1
+}
+
+

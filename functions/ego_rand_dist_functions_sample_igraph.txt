@@ -1,0 +1,87 @@
+#################################################################
+#These programs are used in fullegofunction
+#
+#First one runs egofunc on list of a list of networks
+#Second one makes comparison b/t networks and actual distribution
+#input is a distribution of egonetworks
+#output is chisqvalue and network distribution
+##################################################################
+delete.func=function(y,max.alter){if (nrow(y)>(max.alter+1)){y=y[1:(max.alter+1),1:(max.alter+1)];y} else {y}}
+
+egodistfunc<-function(x,ids,max.alter) {
+edges=c(t(as.edgelist.func(x)))
+library(igraph, warn.conflicts=F, quietly=T)
+net=graph(edges,n=as.numeric(x[[2]][[1]]),directed=FALSE)
+egosx=graph.neighborhood(net, 1, nodes=ids);
+rand=lapply(egosx,get.adjacency,sparse=F)
+
+rand=lapply(lapply(rand,rearrange.func),as.matrix)
+detach(package:igraph)
+library(sna, warn.conflicts=F, quietly=T);library(network, warn.conflicts=F, quietly=T);
+
+rand=lapply(rand,delete.func,max.alter=max.alter)
+
+lapply(rand,egofunc)
+
+}
+
+rearrange.func=function(input.mat){
+csums=colSums(input.mat)
+
+row.ids=c(which(csums==max(csums)),which(csums!=max(csums))  )
+input.mat[row.ids,row.ids]
+}
+
+
+randdistfunc<-function(randdist,tableego) {
+ 
+ disttable<-table(randdist)
+ 
+levels<-as.numeric(names(disttable))
+ 
+temp.dist=rep(0,53)
+temp.dist[levels]=disttable
+
+disttable=temp.dist
+
+
+a<-which(tableego==0) %in% which(disttable==0)
+zeros<-which(tableego==0)[c(which(a==1))]
+tableego[zeros]<-1
+disttable[zeros]<-1
+
+tableego[tableego==0]=1
+
+chisq_temp=suppressWarnings(chisq.test(x=disttable,p=tableego/sum(tableego) ))
+chisq<-as.numeric(chisq_temp$stat)
+
+#chisq<-as.numeric(chisq.test(x=disttable,p=tableego/sum(tableego) )$stat)
+
+list(chisq,disttable)
+
+}
+
+as.edgelist.func=function (x, attrname = NULL,noedgeattribute=T, ...) 
+{
+    if (is.hyper(x)) 
+        stop("Hypergraphs not currently supported in as.matrix.network.edgelist.  Exiting.\n")
+ 
+if (noedgeattribute==F){
+   nal <- as.logical(get.edge.attribute(x$mel, "na"))
+}
+
+
+subnet=x$mel[ unlist(x$iel)]
+m <- cbind(unlist(sapply(subnet, "[[", "outl")), unlist(sapply(subnet, 
+        "[[", "inl")))
+m=m[order(m[,2],m[,1]),]
+if (noedgeattribute==T){nal=rep(0,nrow(m))}
+
+
+    if (!is.null(attrname)) 
+        m <- cbind(m, unlist(get.edge.attribute(x$mel, attrname)))
+    m <- m[!nal, , drop = FALSE]
+    if (length(m) == 0) 
+        matrix(numeric(0), ncol = 2)
+    else m
+}
