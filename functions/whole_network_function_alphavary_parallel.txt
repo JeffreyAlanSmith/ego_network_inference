@@ -351,7 +351,7 @@ max_expected_edges=summary(initial.network~edges)*10
 
 netchange<-simulate(formula, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -399,7 +399,7 @@ chisq[2:half]<- 10000 #just a placeholder for now
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 #updating homoph coefs after 1/2 of sims 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -417,7 +417,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 
 #updating homoph coefs after 1/2 of sims 
@@ -439,7 +439,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 
 if (is.null(diff.tableego.vector)){
@@ -526,7 +526,7 @@ formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
 
 netchange<-simulate(formula.temp, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -574,7 +574,7 @@ chisq[2:half]<- 10000 #just a placeholder for now
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 #updating homoph coefs after 1/2 of sims 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -592,7 +592,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 
 #updating homoph coefs after 1/2 of sims 
@@ -614,7 +614,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 
 if (is.null(diff.tableego.vector)){
@@ -828,7 +828,7 @@ alpha=paramatrix[x,ncol(paramatrix)]
 
 netchange<-simulate(formula, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -873,7 +873,7 @@ chisq[2:half]<- 10000 #just a placeholder for now
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 
 #updating homoph coefs after 1/2 of sims 
@@ -893,7 +893,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 #updating homoph coefs after 1/2 of sims 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -914,7 +914,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1006,7 +1006,7 @@ formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
 
 netchange<-simulate(formula.temp, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1054,7 +1054,7 @@ chisq[2:half]<- 10000 #just a placeholder for now
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 #updating homoph coefs after 1/2 of sims 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -1072,7 +1072,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval*half.1, MCMC.maxedges=max_expected_edges) )
 
 
 #updating homoph coefs after 1/2 of sims 
@@ -1094,7 +1094,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 
 if (is.null(diff.tableego.vector)){
@@ -1263,7 +1263,7 @@ summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.maxedges=max_expected_edges) )
 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
  var.name.characs= var.name.characs,case.control.type="simulated.data"
@@ -1279,7 +1279,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.maxedges=max_expected_edges) )
 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
  var.name.characs= var.name.characs,case.control.type="simulated.data"
@@ -1292,7 +1292,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.maxedges=max_expected_edges) )
 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
  var.name.characs= var.name.characs,case.control.type="simulated.data"
@@ -1305,7 +1305,7 @@ coefs[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*2, MCMC.maxedges=max_expected_edges) )
 
  start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
  var.name.characs= var.name.characs,case.control.type="simulated.data"
@@ -1558,7 +1558,7 @@ alpha<-paramatrix[x,ncol(paramatrix)]
 
 netchange<-simulate(formula, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1596,7 +1596,7 @@ formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1679,7 +1679,7 @@ formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
 
 netchange<-simulate(formula.temp, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1709,7 +1709,7 @@ formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1919,7 +1919,7 @@ alpha=paramatrix[x,ncol(paramatrix)]
 
 netchange<-simulate(formula, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -1952,7 +1952,7 @@ randdist=unlist(rand.list)
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -2036,7 +2036,7 @@ formula.temp=as.formula(paste("net~",paste(formula)[[3]]))
 
 netchange<-simulate(formula.temp, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -2067,7 +2067,7 @@ formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=10, MCMC.burnin=interval, MCMC.maxedges=max_expected_edges) )
 
 if (is.null(diff.tableego.vector)){
 randdist<-egodistfunc(netchange,ids=ids,max.alter=max.alter)
@@ -2228,7 +2228,7 @@ summary.data[temp.spots]=dat;names(summary.data)[temp.spots]=names(dat)
 
 netchange<-simulate(formula2, coef=c(coefs),
 nsim=1, constraints=constraints, 
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=interval*8, MCMC.maxedges=max_expected_edges) )
 
 #calculating chisq on found params at end
 

@@ -189,7 +189,7 @@ if (!update.homophily) {
 
 netchange<-simulate(formula, coef=c(params),
 nsim=ns, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 }
 
@@ -200,7 +200,7 @@ params.orig=params
 
 netchange<-simulate(formula, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
 var.name.characs=var.name.characs,case.control.type="simulated.data"
@@ -214,22 +214,7 @@ params[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
-
-
-start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
-var.name.characs=var.name.characs,case.control.type="simulated.data"
-,var.name.characs.alter=var.name.characs.alter,add.trans=F,
-sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
-,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
-,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
-
-start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
-params[constant.homophily.change]=start.point
-
-netchange<-simulate(formula2, coef=c(params),
-nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
 
 
 start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -244,7 +229,22 @@ params[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
+
+
+start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
+var.name.characs=var.name.characs,case.control.type="simulated.data"
+,var.name.characs.alter=var.name.characs.alter,add.trans=F,
+sim.net=netchange,coefs.base=params[constant.homophily.change],formula=formula.case
+,name.vars.case=name.vars.case,name.vars=name.vars[constant.homophily.change]
+,no.nodecov=no.nodecov,max.alter=max.alter,resp.weights=resp.weights,output.weights=T,old.weight.mix=old.weight.mix)
+
+start.point[abs(start.point)>max.thres]=params[constant.homophily.change][abs(start.point)>max.thres]
+params[constant.homophily.change]=start.point
+
+netchange<-simulate(formula2, coef=c(params),
+nsim=1, constraints=constraints,
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
 
 
 }
@@ -315,7 +315,7 @@ if (!update.homophily) {
 
 netchange<-simulate(formula.temp, coef=c(params),
 nsim=ns, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 }
 
@@ -326,7 +326,7 @@ params.orig=params
 
 netchange<-simulate(formula.temp, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=interval, MCMC.burnin=burnin, MCMC.maxedges=max_expected_edges) )
 
 start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
 var.name.characs=var.name.characs,case.control.type="simulated.data"
@@ -342,7 +342,7 @@ formula2=as.formula(paste("netchange~",paste(formula)[[3]]))
 
 netchange<-simulate(formula2, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
 
 
 start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -357,7 +357,7 @@ params[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
 
 
 start.point=adjusted.coefs.func(data=egonet.data,var.name.degree=var.name.degree,
@@ -372,7 +372,7 @@ params[constant.homophily.change]=start.point
 
 netchange<-simulate(formula2, coef=c(params),
 nsim=1, constraints=constraints,
-control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.init.maxedges=max_expected_edges) )
+control=control.simulate.formula(MCMC.interval=100, MCMC.burnin=burnin/4, MCMC.maxedges=max_expected_edges) )
 
 
 }
